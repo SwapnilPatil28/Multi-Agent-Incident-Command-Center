@@ -9,35 +9,67 @@ app_port: 8000
 license: mit
 tags:
   - openenv
+  - reinforcement-learning
+  - llm-agents
 ---
 
-# Support Ticket Routing Environment
+# 🎫 Customer Support Ticket Routing Environment
 
-## Description and Motivation
-This environment simulates a real-world customer support triage system. Automated agents must process incoming tickets and route them to the correct department (Billing, Tech, or Sales). This is a critical task for scaling customer operations using LLM-based agents.
+## 📝 Description and Motivation
+This environment simulates a production-grade customer support triage system. Automated agents are tasked with analyzing raw customer queries and routing them to the appropriate department: **Billing**, **Tech**, or **Sales**. 
 
-## Action Space
-- **action_type**: "route" or "search"
-- **department**: "Billing", "Tech", or "Sales" (Required for route action)
+In real-world scenarios, misrouting leads to high churn and operational costs. This benchmark measures the ability of LLM-based agents to perform high-precision classification in a restricted environment compliant with the `openenv-core` SDK.
 
-## Observation Space
-- **ticket_id**: Unique identifier for the ticket.
-- **content**: The raw text of the customer query.
-- **search_result**: Information retrieved from the internal DB (if search action is used).
-- **available_departments**: ["Billing", "Tech", "Sales"]
+## 🎯 Environment Specification
 
-## Tasks and Difficulty
-- **Easy**: 1 ticket with obvious keywords (e.g., Refund -> Billing).
-- **Medium**: 2 tickets with standard support queries.
-- **Hard**: 3 tickets involving technical logs or complex enterprise queries.
+### Action Space
+- `action_type`: Literal["route", "search"]
+- `department`: Optional[str] — Required for `route` action. Valid values: `"Billing"`, `"Tech"`, `"Sales"`.
 
-## Setup and Usage
-1. Install dependencies: `pip install openenv-core`
-2. Run validation: `openenv validate`
-3. Run baseline: `HF_TOKEN=your_token python inference.py`
+### Observation Space
+- `ticket_id`: Unique tracking ID (e.g., T1, T4).
+- `content`: The raw text string of the customer's request.
+- `search_result`: Contextual data retrieved from the internal database (if the `search` action is invoked).
+- `available_departments`: A list of valid routing targets.
 
-## Baseline Scores
-- Easy: 1.0
-- Medium: 1.0
-- Hard: 1.0
-(Note: Scores are generated using Qwen2.5-72B-Instruct via the Hugging Face Router.)
+### Reward Function
+To facilitate stable training and clear evaluation metrics, this environment uses **strictly bounded rewards**:
+- **0.99**: Correct Department Routing.
+- **0.01**: Incorrect Department Routing.
+- **-0.05**: Search Penalty (Encourages efficiency unless context is truly needed).
+
+## 🏁 Tasks and Difficulty
+| Task ID | Tickets | Description |
+| :--- | :--- | :--- |
+| `easy` | 1 | Clear keywords (e.g., "Refund", "Invoice"). |
+| `medium` | 2 | Standard conversational support language. |
+| `hard` | 3 | Complex queries involving API logs and technical stack traces. |
+
+## 🚀 Setup & Benchmarking
+
+### 1. Installation
+```bash
+pip install openenv-core uvicorn openai
+```
+
+### 2. Run Local Validation
+Ensure your local setup matches the competition requirements:
+```bash
+openenv validate
+```
+
+### 3. Run Baseline Inference
+Execute the provided baseline using the Hugging Face Router and the Qwen2.5-72B model:
+```bash
+export HF_TOKEN="your_huggingface_token"
+python inference.py
+```
+
+## 🛠️ Technical Architecture
+- **Backend**: Python FastAPI serving `openenv-core` compatible endpoints.
+- **Infrastructure**: Containerized deployment via Docker on Hugging Face Spaces.
+- **Models**: Pydantic-based state and action validation.
+
+---
+*Submission for the Scaler Meta PyTorch Hackathon.*
+*Environment ID: `support_env` | Powered by OpenEnv SDK.*

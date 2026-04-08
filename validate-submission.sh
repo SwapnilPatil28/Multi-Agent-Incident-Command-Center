@@ -35,7 +35,7 @@ else
 fi
 
 log "${BOLD}Step 2/3: Running docker build (Simulated)${NC} ..."
-# Note: Actual docker build is usually slow in Colab, we check for Dockerfile existence first
+# Note: Actual docker build is slow in Colab without specific setup, so we verify Dockerfile logic presence
 if [ -f "$REPO_DIR/server/Dockerfile" ] || [ -f "$REPO_DIR/Dockerfile" ]; then
   pass "Dockerfile found"
 else

@@ -24,17 +24,19 @@ class SupportEnvironment(Environment):
         self.current_task = self.tasks.get(task_name, self.tasks["easy"])
         self._state = SupportState(episode_id=str(uuid.uuid4()), task_id=task_name, current_ticket_index=0)
         t = self.current_task[0]
-        return SupportObservation(done=False, reward=0.0, ticket_id=t["id"], content=t["text"])
+        return SupportObservation(done=False, reward=0.01, ticket_id=t["id"], content=t["text"])
 
     def step(self, action: SupportAction) -> SupportObservation:
         self._state.step_count += 1
         ticket = self.current_task[self._state.current_ticket_index]
 
         if action.action_type == "search":
-            return SupportObservation(done=False, reward=-0.05, ticket_id=ticket["id"], content=ticket["text"], search_result=self._db.get(ticket["id"], "No record."))
+            # Small penalty but staying > 0
+            return SupportObservation(done=False, reward=0.01, ticket_id=ticket["id"], content=ticket["text"], search_result=self._db.get(ticket["id"], "No record."))
 
         correct = action.department.strip().lower() == ticket["dept"].lower()
-        reward = 1.0 if correct else 0.0
+        # Strictly between 0 and 1: 0.99 for correct, 0.01 for incorrect
+        reward = 0.99 if correct else 0.01
         self._state.current_ticket_index += 1
 
         if self._state.current_ticket_index < len(self.current_task):

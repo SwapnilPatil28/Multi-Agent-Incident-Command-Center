@@ -1,0 +1,10 @@
+name: "support_env"
+version: "1.0"
+description: "A real-world environment for routing customer support tickets."
+tasks:
+  - id: "easy"
+    description: "Route 1 obvious ticket."
+  - id: "medium"
+    description: "Route 2 standard tickets."
+  - id: "hard"
+    description: "Route 3 complex tickets."

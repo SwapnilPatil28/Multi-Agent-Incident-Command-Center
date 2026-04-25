@@ -23,6 +23,104 @@ tags:
 
 [![Tests](https://img.shields.io/badge/tests-21%20passing-brightgreen)](./tests) [![OpenEnv](https://img.shields.io/badge/OpenEnv-v0.2%2B-blue)](https://github.com/meta-pytorch/openenv) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE) ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
+---
+
+## Part 1 — The story in 2 minutes
+
+> **When a real tech company has an outage, three people's phones buzz at once.** A Triage engineer, an Investigator, and an Ops Manager have to cooperate under a ticking SLA clock while every extra action costs budget. **We built a simulator that teaches LLMs to do that job — and fine-tuned one that does it as well as the human expert.**
+
+### The problem, in one line
+
+Real incident response isn't "pick the right label." It's **multi-agent, long-horizon, partially observable** teamwork — and it's exactly where general-purpose LLMs fall over. We built an OpenEnv simulator of a live tech-company war room so agents can *practice* the job, end-to-end.
+
+### The environment, as a picture
+
+A **virtual war room** where three specialist agents resolve a live queue of real-world tech incidents:
+
+| Role | Can do | Cannot do |
+|---|---|---|
+| 🔍 **Triage agent** | Pull logs · check metrics · consult KB | Close a ticket |
+| 🧪 **Investigator** | Apply a fix · roll back a deploy | Escalate or file a post-mortem |
+| 👷 **Ops Manager** | Escalate · file post-mortem · **close the ticket** | Apply a code fix |
+
+**13 real incidents** · **3 difficulty tiers** (easy / medium / hard) · **14+ named reward signals** · **customer-tier weighting** (enterprise outages cost ~3× a free-tier outage)
+
+> Wrong actor → **−0.08**. Wrong root-cause on an enterprise ticket → **−1.98**. Correct closure on an enterprise ticket → **+1.44**. The rules matter — and every step tells you *why* it was scored.
+
+### The headline result
+
+One picture, four policies, three difficulty tiers:
+
+![Reward curve comparing random, base LLM, fine-tuned LLM, and heuristic across easy, medium, and hard tasks](./artifacts/reward_curve.png)
+
+| Policy | What is it? | Hard-tier reward |
+|---|---|---:|
+| 🔴 **Random** | Picks an action uniformly | **−12.50** |
+| 🟠 **Base Qwen2.5-1.5B** | Off-the-shelf LLM, **no fine-tuning** | **−4.28** |
+| 🟢 **Our fine-tuned LLM** | Same model, SFT on 680 rollout examples | **+5.89** |
+| 🔵 **Heuristic (oracle)** | Human-written "ideal" policy | **+5.89** |
+
+> **The AI went from −4.28 → +5.89 on hard incidents — a +10.17 reward swing — and matched the human expert component-for-component.**
+
+### What did the agent actually learn?
+
+Not "which label to pick." It learned **a whole workflow** — and the reward rubric makes that visible:
+
+![Stacked-bar chart showing where each policy earns or loses reward, broken down by rubric component](./artifacts/reward_components.png)
+
+| Before fine-tuning 🟠 | After fine-tuning 🟢 |
+|---|---|
+| Only earns `clue_bonus` (+0.24) | Unlocks **`closure_correct +7.36`** · **`mitigation_correct +2.10`** · **`postmortem_bonus +0.60`** |
+| Bleeds `step_cost` (−5.16) and `sla_exhausted` (−5.04) | Respects the SLA → **zero** `sla_exhausted` |
+| Closes **0** incidents correctly | Closes incidents **like the expert does** |
+| "Looks busy" but times out | Actually solves the problem |
+
+### How training went (the short version)
+
+![SFT loss dropping from ~2.84 to ~0.02 and token accuracy climbing from ~0.49 to ~0.99 over 3 epochs](./artifacts/training_curve.png)
+
+| Step | What happened |
+|---|---|
+| 1. **Collect** | Run the expert heuristic over every incident → **680 rollout examples** (prompt = observation, completion = structured action) |
+| 2. **Supervise** | TRL `SFTTrainer`, 3 epochs → loss **2.84 → 0.02**, token accuracy **0.49 → 0.99** |
+| 3. **Evaluate** | Re-run random / heuristic / base-LLM / SFT-LLM under identical seeds |
+| 4. **Plot** | Reward curve, training curve, reward-component breakdown — all committed to [`artifacts/`](./artifacts) |
+
+### The surprise finding — size matters
+
+Same pipeline, same data recipe, smaller backbone:
+
+| Backbone | Dataset rows | Base → SFT on **hard** | Hard incidents closed |
+|---|---:|---:|---|
+| Qwen2.5-**0.5B**-Instruct | 255 | **+0.00** | **0** |
+| Qwen2.5-**1.5B**-Instruct | 680 | **+10.17** | full expert behavior |
+
+> At **0.5B** the model is *too small* to absorb this multi-step, role-gated policy even with perfect supervision. At **1.5B** capacity is suddenly sufficient and behavior cloning converges. The rubric surfaces this — it's not hidden inside a single aggregate score.
+
+### Why this environment hits all three hackathon themes
+
+| Theme | How we satisfy it |
+|---|---|
+| **#1 Multi-agent** | Three roles with **different permissions** who have to cooperate. Wrong-actor calls are punished (−0.08). Correct handoff is rewarded (+0.15). |
+| **#2 Long-horizon** | Each episode runs **3–5 sequential incidents**, 20–60 steps each, under one ticking SLA clock. The big reward (+0.80 × tier) only fires after clues → fix → post-mortem. Sparse and delayed by design. |
+| **#3 Professional world-model** | Real tech incidents with **logs, metrics, KB articles, red-herring signals, customer-tier revenue impact, SLA clocks**. Close an enterprise ticket wrong and it hurts ~3× what a free-tier one does. |
+
+### Try it in 30 seconds
+
+| | |
+|---|---|
+| 🟢 **Live environment** | **[Open the dashboard ↗](https://swapnilpatil28-multi-agent-incident-command-center.hf.space)** |
+| 💻 **Source code** | **[GitHub repo ↗](https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center)** |
+| 🎓 **Reproduce the training** | **[One-click Colab notebook ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)** |
+| 📺 **2-minute video walkthrough** | *Coming soon — shot list in [`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md)* |
+| 📝 **Mini blog post** | *Coming soon — full draft in [`docs/BLOG_POST.md`](./docs/BLOG_POST.md)* |
+
+> Want the rubric math, architecture, full numbers, configuration, and the hackathon checklist? Keep scrolling — **Part 2** is the full technical README.
+
+---
+
+## Part 2 — Technical deep dive
+
 ### Live links
 
 | What | Where |

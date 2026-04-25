@@ -95,6 +95,55 @@ def build_training_dataset(episodes_per_task: int = 4) -> Dataset:
     return Dataset.from_list(all_rows)
 
 
+def _dataset_to_sft_text_column(dataset: Dataset, tokenizer) -> Dataset:
+    """
+    TRL 0.20+ tokenization can fail or mis-detect `prompt`/`completion` (e.g. old `response` key, or
+    `formatting_func` that drops columns). A single `text` column + `dataset_text_field` uses the
+    standard LM code path in SFT and is the most reliable across TRL versions.
+    """
+    from transformers import PreTrainedTokenizerBase
+
+    if not isinstance(tokenizer, PreTrainedTokenizerBase):
+        return dataset
+
+    # Accept either column name (old notebooks / stale clones)
+    cols = set(dataset.column_names)
+    if "completion" not in cols and "response" in cols:
+        dataset = dataset.rename_column("response", "completion")
+    if "prompt" not in dataset.column_names or "completion" not in dataset.column_names:
+        raise ValueError(
+            f"Expected columns 'prompt' and 'completion' (or 'response'). Got: {dataset.column_names}"
+        )
+
+    has_template = bool(getattr(tokenizer, "chat_template", None))
+
+    def to_text_batched(examples: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        out: List[str] = []
+        for prompt, completion in zip(examples["prompt"], examples["completion"]):
+            if has_template:
+                messages = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": completion},
+                ]
+                out.append(
+                    tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=False,
+                    )
+                )
+            else:
+                out.append(f"User: {prompt}\n\nAssistant: {completion}")
+        return {"text": out}
+
+    to_drop = [c for c in dataset.column_names if c != "text"]
+    return dataset.map(
+        to_text_batched,
+        batched=True,
+        remove_columns=to_drop,
+    )
+
+
 def run_trl_sft(dataset: Dataset) -> None:
     """
     Minimal TRL script.
@@ -115,6 +164,9 @@ def run_trl_sft(dataset: Dataset) -> None:
 
     model = AutoModelForCausalLM.from_pretrained(BASE_MODEL)
 
+    # Single `text` column — avoids TRL's prompt+completion tokenize path KeyErrors across versions.
+    train_ds = _dataset_to_sft_text_column(dataset, tokenizer)
+
     # TRL >= 0.20 uses `max_length`; older versions used `max_seq_length`.
     config = SFTConfig(
         output_dir="outputs/sft_run",
@@ -123,16 +175,16 @@ def run_trl_sft(dataset: Dataset) -> None:
         learning_rate=2e-5,
         num_train_epochs=1,
         max_length=768,
+        dataset_text_field="text",
         logging_steps=5,
         save_strategy="no",
         report_to="none",
     )
 
-    # Use prompt + completion columns; pass tokenizer as processing_class (TRL 0.20+).
     trainer = SFTTrainer(
         model=model,
         args=config,
-        train_dataset=dataset,
+        train_dataset=train_ds,
         processing_class=tokenizer,
     )
     trainer.train()

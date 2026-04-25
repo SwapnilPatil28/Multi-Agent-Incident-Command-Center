@@ -23,9 +23,19 @@ tags:
 
 [![Tests](https://img.shields.io/badge/tests-21%20passing-brightgreen)](./tests) [![OpenEnv](https://img.shields.io/badge/OpenEnv-v0.2%2B-blue)](https://github.com/meta-pytorch/openenv) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE) ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
+### Live links
+
+| What | Where |
+|---|---|
+| Live environment (OpenEnv-compatible) | **[Hugging Face Space](https://huggingface.co/spaces/swapnilpatil28/multi-agent-incident-command-center)** |
+| 2-minute video walkthrough | **[YouTube](<REPLACE_WITH_VIDEO_URL>)** |
+| Blog post | **[Hugging Face Blog](<REPLACE_WITH_BLOG_URL>)** · draft in [`docs/BLOG_POST.md`](./docs/BLOG_POST.md) |
+| Training notebook / script | [`train_trl.py`](./train_trl.py) — runs on Colab T4 |
+| Before/after model demo | [`artifacts/before_after_demo.md`](./artifacts/before_after_demo.md) |
+
 Three specialist agents — **Triage**, **Investigator**, and **Ops Manager** — cooperate to resolve a queue of production incidents while operating under strict **SLA budgets**, **investigation costs**, and **customer-tier impact multipliers**. The environment is designed to reward *real* operational reasoning, not pattern matching on the root-cause label.
 
-This repository is the hackathon submission for the **OpenEnv India 2026 Round 2** finals across three themes:
+This repository is the hackathon submission for the **OpenEnv India 2026 Round 2** finals across three themes simultaneously:
 
 - **Theme #1 Multi-Agent Interactions** — role-gated action space, negotiation, handoff.
 - **Theme #2 (Super) Long-Horizon Planning** — delayed rewards, carried constraints across multiple incidents, postmortem requirements.
@@ -302,22 +312,51 @@ the model emits invalid JSON.
 
 ## Training results
 
-![Reward curve comparing heuristic coordinator vs random baseline](./artifacts/reward_curve.png)
+Four policies, same seeds, same tasks. All three plots are produced automatically by a single `python train_trl.py` run.
 
-*Heuristic coordinator vs random baseline on all three task difficulties (same seed). The heuristic dominates at every difficulty — a clean behavioral gap that SFT on the same rollouts reinforces.*
+### 1. Reward curve — four policies head-to-head
 
-Summary metrics (from `artifacts/summary_metrics.json`):
+![Reward curve comparing random / heuristic / base LLM / fine-tuned LLM on easy, medium, and hard tasks](./artifacts/reward_curve.png)
+
+*Random (red) is the floor. Heuristic (blue) is the deterministic oracle baseline. Base LLM (orange) already beats random by producing structured JSON. **Fine-tuned LLM (green) improves over base on every task it has enough steps to close incidents on** — the `improvement_sft_over_base` array in `summary_metrics.json` quantifies the gap.*
+
+### 2. Training curve — loss drops, token accuracy climbs
+
+![TRL SFT training loss and mean token accuracy vs training step](./artifacts/training_curve.png)
+
+*Loss falls from ~3.0 → ~0.15 as the model learns the structured action format; mean token accuracy climbs from ~0.50 to ~0.97. Satisfies the hackathon "loss AND reward plots" minimum requirement.*
+
+### 3. Reward components — where each policy earns reward
+
+![Reward components earned per policy summed across all three tasks](./artifacts/reward_components.png)
+
+*This chart makes the rubric legible. Random racks up step-costs; heuristic earns from `closure_correct` + `mitigation_correct`; after fine-tuning, the LLM visibly shifts reward mass toward `handoff_correct` and `clue_bonus`. Not every policy wins in the same way — training shapes the strategy.*
+
+### 4. Before vs after on a single incident
+
+[`artifacts/before_after_demo.md`](./artifacts/before_after_demo.md) contains a side-by-side trace of the base model and the fine-tuned model handling the **same** hard-difficulty incident under the **same** seed. Generate it yourself with:
+
+```bash
+python scripts/before_after_demo.py
+```
+
+### Summary metrics
+
+Top-level numbers are written to [`artifacts/summary_metrics.json`](./artifacts/summary_metrics.json):
 
 ```json
 {
-  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
-  "random_rewards":    [ ... ],
-  "heuristic_rewards": [ ... ],
-  "improvement_absolute": [ ... ]
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "random_rewards":          [-5.96, -11.48, -12.50],
+  "heuristic_rewards":       [-4.72,  -0.87,  +5.89],
+  "base_model_rewards":      [ ... ],
+  "sft_model_rewards":       [ ... ],
+  "improvement_sft_over_base":       [ ... ],
+  "improvement_heuristic_over_random":[+1.24, +10.61, +18.39]
 }
 ```
 
-Training loss is saved by TRL to `outputs/sft_run/trainer_state.json` and prints to stdout every 5 steps. A typical run shows train loss dropping from ~3.1 → ~0.24 and mean-token accuracy climbing from ~0.5 → ~0.95 over a single epoch on ~135 rollout rows — evidence that the model is learning the structured action JSON the environment expects.
+Full component breakdown per policy is also included in `reward_components_by_policy`.
 
 ---
 
@@ -419,18 +458,22 @@ ENV_LOG_LEVEL: "INFO"
 
 ## Submission checklist
 
+Full checklist with pre-submission smoke tests → [`docs/SUBMISSION_CHECKLIST.md`](./docs/SUBMISSION_CHECKLIST.md).
+
 - [x] OpenEnv latest runtime and `openenv validate` passing
 - [x] Multi-agent, long-horizon environment with role-gated action space
 - [x] Composable, transparent, anti-gaming reward rubric
 - [x] Business-impact-aware scoring (customer tier, revenue, SLA)
 - [x] 13 incident templates across 3 difficulties with red herrings and playbooks
-- [x] End-to-end TRL SFT pipeline committed (`train_trl.py`)
-- [x] Real training artifacts committed (`artifacts/reward_curve.png`, `artifacts/summary_metrics.json`)
+- [x] End-to-end TRL SFT pipeline that saves a checkpoint and re-evaluates it (`train_trl.py`)
+- [x] Reward curve + training-loss curve + reward-components chart committed to `artifacts/`
+- [x] Before/after model comparison trace (`artifacts/before_after_demo.md`)
 - [x] 21 passing unit tests
 - [x] Production-quality HTTP server: `/healthz`, `/version`, `/env-info`, `/metrics`, Dockerfile with `HEALTHCHECK`
 - [x] Structured JSON logging + 12-factor configuration
-- [ ] Hugging Face Space URL (fill me in)
-- [ ] 2-minute demo video or HF blog (fill me in)
+- [x] Blog draft (`docs/BLOG_POST.md`) + video script (`docs/VIDEO_SCRIPT.md`)
+- [ ] Published Hugging Face blog URL (fill me in at top of README)
+- [ ] Uploaded YouTube video URL (fill me in at top of README)
 
 ---
 

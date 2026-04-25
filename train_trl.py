@@ -59,6 +59,7 @@ class EpisodeStats:
     total_reward: float
     steps: int
     success: bool
+    components: Dict[str, float] = None  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ def rollout(
     coordinator = HeuristicCoordinator()
     records: List[Dict[str, str]] = []
     rewards: List[float] = []
+    components_sum: Dict[str, float] = {}
     steps = 0
     step_cap = max_steps if max_steps is not None else MAX_ROLLOUT_STEPS
 
@@ -143,6 +145,9 @@ def rollout(
 
             result = env.step(action)
             rewards.append(float(result.reward or 0.0))
+            step_components = getattr(result.observation, "reward_components", None) or {}
+            for key, value in step_components.items():
+                components_sum[key] = components_sum.get(key, 0.0) + float(value)
     finally:
         try:
             env.close()
@@ -151,11 +156,15 @@ def rollout(
 
     total_reward = sum(rewards)
     success = total_reward > 0.0
-    return (
-        EpisodeStats(policy_name, task_name, total_reward, steps, success),
-        records,
-        rewards,
+    stats = EpisodeStats(
+        policy_name=policy_name,
+        task_name=task_name,
+        total_reward=total_reward,
+        steps=steps,
+        success=success,
+        components={k: round(v, 4) for k, v in components_sum.items()},
     )
+    return (stats, records, rewards)
 
 
 def build_training_dataset(episodes_per_task: int = EPISODES_PER_TASK) -> Dataset:
@@ -259,7 +268,12 @@ def run_trl_sft(dataset: Dataset) -> Path:
     SFT_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     trainer.save_model(str(SFT_MODEL_DIR))
     tokenizer.save_pretrained(str(SFT_MODEL_DIR))
+
+    log_path = ARTIFACT_DIR / "training_log.json"
+    with log_path.open("w", encoding="utf-8") as f:
+        json.dump(trainer.state.log_history, f, indent=2, default=str)
     print(f"[train] Saved SFT checkpoint to {SFT_MODEL_DIR}")
+    print(f"[train] Saved training log to {log_path}")
 
     del trainer, model, tokenizer
     _free_gpu_memory()
@@ -306,6 +320,7 @@ def _evaluate_single_policy(
     policy_name: str,
     select_fn: Callable[[IncidentObservation], IncidentAction],
     max_steps: Optional[int] = None,
+    components_accumulator: Optional[Dict[str, float]] = None,
 ) -> List[float]:
     scores: List[float] = []
     for task in ["easy", "medium", "hard"]:
@@ -320,17 +335,20 @@ def _evaluate_single_policy(
             f"reward={stats.total_reward:+.2f} steps={stats.steps}"
         )
         scores.append(round(stats.total_reward, 4))
+        if components_accumulator is not None and stats.components:
+            for k, v in stats.components.items():
+                components_accumulator[k] = components_accumulator.get(k, 0.0) + v
     return scores
 
 
 def evaluate_policies(
     seed: int = 7,
     evaluate_llms: Optional[bool] = None,
-) -> Dict[str, List[float]]:
+) -> Dict[str, object]:
     """Run each policy once per task under the same seed.
 
-    The random policy is seeded for reproducibility. The heuristic policy is
-    deterministic already. LLM policies are evaluated with greedy decoding.
+    Returns a dict with keys ``scores`` (mapping policy -> [easy, medium, hard])
+    and ``components`` (mapping policy -> {component_name: summed_value}).
     """
     random.seed(seed)
 
@@ -340,30 +358,43 @@ def evaluate_policies(
         "base_model": [],
         "sft_model": [],
     }
+    components: Dict[str, Dict[str, float]] = {
+        "random": {},
+        "heuristic": {},
+        "base_model": {},
+        "sft_model": {},
+    }
 
     for task in ["easy", "medium", "hard"]:
         random_stats, _, _ = rollout("random", task)
         heuristic_stats, _, _ = rollout("heuristic", task)
         scores["random"].append(round(random_stats.total_reward, 4))
         scores["heuristic"].append(round(heuristic_stats.total_reward, 4))
+        for k, v in (random_stats.components or {}).items():
+            components["random"][k] = components["random"].get(k, 0.0) + v
+        for k, v in (heuristic_stats.components or {}).items():
+            components["heuristic"][k] = components["heuristic"].get(k, 0.0) + v
 
     should_eval_llms = _should_evaluate_llms() if evaluate_llms is None else evaluate_llms
     if not should_eval_llms:
         print("[eval] Skipping LLM evaluation (no GPU or EVAL_LLM_MODELS=false).")
-        return scores
+        return {"scores": scores, "components": components}
 
     try:
         from llm_policy import LLMPolicy
     except Exception as exc:  # pragma: no cover - import-time safety
         print(f"[eval] Could not import LLMPolicy ({exc}); skipping LLM eval.")
-        return scores
+        return {"scores": scores, "components": components}
 
     # Base model
     try:
         print(f"[eval] Loading BASE model: {BASE_MODEL}")
         base = LLMPolicy(BASE_MODEL, label="base_model")
         scores["base_model"] = _evaluate_single_policy(
-            "base_model", base.select_action, max_steps=MAX_LLM_EVAL_STEPS
+            "base_model",
+            base.select_action,
+            max_steps=MAX_LLM_EVAL_STEPS,
+            components_accumulator=components["base_model"],
         )
         base.release()
         _free_gpu_memory()
@@ -376,7 +407,10 @@ def evaluate_policies(
             print(f"[eval] Loading SFT model: {SFT_MODEL_DIR}")
             sft = LLMPolicy(str(SFT_MODEL_DIR), label="sft_model")
             scores["sft_model"] = _evaluate_single_policy(
-                "sft_model", sft.select_action, max_steps=MAX_LLM_EVAL_STEPS
+                "sft_model",
+                sft.select_action,
+                max_steps=MAX_LLM_EVAL_STEPS,
+                components_accumulator=components["sft_model"],
             )
             sft.release()
             _free_gpu_memory()
@@ -385,7 +419,122 @@ def evaluate_policies(
     else:
         print(f"[eval] No SFT checkpoint found at {SFT_MODEL_DIR}; skipping SFT eval.")
 
-    return scores
+    return {"scores": scores, "components": components}
+
+
+def plot_training_curve(
+    log_path: Path = ARTIFACT_DIR / "training_log.json",
+    out_path: Path = ARTIFACT_DIR / "training_curve.png",
+) -> None:
+    """Plot loss (and token accuracy if present) vs training step from TRL log.
+
+    Satisfies the hackathon minimum requirement of showing BOTH loss and reward plots.
+    """
+    if not log_path.exists():
+        return
+    try:
+        log = json.loads(log_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    steps: List[int] = []
+    losses: List[float] = []
+    accs: List[Optional[float]] = []
+    for entry in log:
+        if "loss" not in entry or "step" not in entry:
+            continue
+        try:
+            steps.append(int(entry["step"]))
+            losses.append(float(entry["loss"]))
+            acc = entry.get("mean_token_accuracy")
+            accs.append(float(acc) if acc is not None else None)
+        except Exception:
+            continue
+
+    if not steps:
+        return
+
+    fig, ax1 = plt.subplots(figsize=(9, 5))
+    ax1.plot(steps, losses, marker="o", color="tab:blue", label="Training loss", linewidth=2)
+    ax1.set_xlabel("Training step")
+    ax1.set_ylabel("Loss", color="tab:blue")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+    ax1.grid(alpha=0.3)
+
+    if all(a is not None for a in accs):
+        ax2 = ax1.twinx()
+        ax2.plot(
+            steps,
+            accs,
+            marker="^",
+            color="tab:orange",
+            label="Mean token accuracy",
+            linewidth=2,
+        )
+        ax2.set_ylabel("Mean token accuracy", color="tab:orange")
+        ax2.tick_params(axis="y", labelcolor="tab:orange")
+        ax2.set_ylim(0.0, 1.05)
+
+    plt.title("TRL SFT training curve — loss & token accuracy")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
+def plot_reward_components(
+    components_by_policy: Dict[str, Dict[str, float]],
+    out_path: Path = ARTIFACT_DIR / "reward_components.png",
+) -> None:
+    """Grouped bar chart of reward-component contributions per policy.
+
+    Visualizes the rubric-based reward signal: where each policy's reward
+    actually comes from (step cost, clue bonus, handoff, mitigation, closure,
+    etc.). Makes the reward design visible to judges at a glance.
+    """
+    if not components_by_policy:
+        return
+
+    all_keys: List[str] = []
+    for comps in components_by_policy.values():
+        for k in comps:
+            if k not in all_keys:
+                all_keys.append(k)
+    if not all_keys:
+        return
+
+    policies = list(components_by_policy.keys())
+    n_policies = len(policies)
+    n_keys = len(all_keys)
+
+    fig, ax = plt.subplots(figsize=(max(10, n_keys * 0.6), 6))
+    bar_width = 0.8 / max(n_policies, 1)
+    colors = {
+        "random": "tab:red",
+        "heuristic": "tab:blue",
+        "base_model": "tab:orange",
+        "sft_model": "tab:green",
+    }
+    for i, policy in enumerate(policies):
+        values = [components_by_policy[policy].get(k, 0.0) for k in all_keys]
+        offsets = [x + i * bar_width - 0.4 + bar_width / 2 for x in range(n_keys)]
+        ax.bar(
+            offsets,
+            values,
+            width=bar_width,
+            label=policy,
+            color=colors.get(policy, None),
+        )
+
+    ax.axhline(0, color="gray", linewidth=0.8)
+    ax.set_xticks(range(n_keys))
+    ax.set_xticklabels(all_keys, rotation=35, ha="right")
+    ax.set_ylabel("Summed reward contribution (all tasks)")
+    ax.set_title("Where each policy earns / loses reward — rubric components")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
 
 
 def plot_rewards(score_map: Dict[str, List[float]]) -> None:
@@ -423,8 +572,13 @@ def main() -> None:
     dataset.save_to_disk(str(ARTIFACT_DIR / "trl_dataset"))
 
     run_trl_sft(dataset)
-    scores = evaluate_policies()
+    eval_out = evaluate_policies()
+    scores: Dict[str, List[float]] = eval_out["scores"]  # type: ignore[assignment]
+    components: Dict[str, Dict[str, float]] = eval_out["components"]  # type: ignore[assignment]
+
     plot_rewards(scores)
+    plot_training_curve()
+    plot_reward_components(components)
 
     summary = {
         "base_model": BASE_MODEL,
@@ -442,6 +596,11 @@ def main() -> None:
             round(h - r, 4)
             for h, r in zip(scores.get("heuristic", []), scores.get("random", []))
         ],
+        "reward_components_by_policy": {
+            policy: {k: round(v, 4) for k, v in comps.items()}
+            for policy, comps in components.items()
+            if comps
+        },
     }
     with open(ARTIFACT_DIR / "summary_metrics.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

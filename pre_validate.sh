@@ -10,6 +10,8 @@ openenv validate
 echo "[3/3] Checking Inference Script format..."
 if [ -f "inference.py" ]; then echo "  ✓ inference.py found"; else echo "  ✗ inference.py missing"; exit 1; fi
 
+if [ -f "train_trl.py" ]; then echo "  ✓ train_trl.py found"; else echo "  ✗ train_trl.py missing"; exit 1; fi
+
 echo "========================================"
 echo "  Ready for Submission!"
 echo "========================================"

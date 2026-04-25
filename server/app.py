@@ -1,6 +1,6 @@
 ﻿from openenv.core.env_server import create_fastapi_app
-from models import SREAction, SREObservation
-from server.environment import SREEnvironment
+from models import IncidentAction, IncidentObservation
+from server.environment import IncidentCommandCenterEnvironment
 from fastapi.responses import HTMLResponse
 import uvicorn
 
@@ -10,7 +10,7 @@ dashboard_content = r"""
 <head>
     <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>SRE Debugging | OpenEnv Dashboard</title>
+    <title>Incident Command Center | OpenEnv Dashboard</title>
     <style>
         :root { --primary: #3b82f6; --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; }
         body { font-family: -apple-system, sans-serif; background-color: var(--bg); color: var(--text); padding: 2rem; }
@@ -20,24 +20,31 @@ dashboard_content = r"""
 </head>
 <body>
     <div class='container'>
-        <h1>Long-Horizon SRE Debugging</h1>
-        <p>Theme 3.1: Professional Tasks - Multi-step agent triage simulator.</p>
+        <h1>Multi-Agent Incident Command Center</h1>
+        <p>Round-2 themes: Multi-Agent Interactions + World Modeling (Professional Tasks).</p>
         
         <h2>Action Space</h2>
         <ul>
-            <li><code>query_logs(service_name)</code></li>
-            <li><code>check_metrics(dashboard_id)</code></li>
-            <li><code>resolve_ticket(root_cause)</code></li>
+            <li><code>inspect_logs(target)</code></li>
+            <li><code>inspect_metrics(target)</code></li>
+            <li><code>consult_kb(target)</code></li>
+            <li><code>negotiate_handoff(target)</code></li>
+            <li><code>apply_fix(resolution_summary)</code></li>
+            <li><code>close_incident(root_cause)</code></li>
         </ul>
         
         <h2>Reward Logic</h2>
-        <p>Correctly resolving a ticket yields <b>+1.0</b>. Querying logs or checking metrics costs a slight penalty of <b>-0.1</b> to encourage agent efficiency. Wrong resolution gives <b>-1.0</b>.</p>
+        <p>Dense reward shaping for clue discovery, team coordination, and efficient resolution under budget + SLA constraints. Correct closure with mitigation gets the highest reward.</p>
     </div>
 </body>
 </html>
 """
 
-app = create_fastapi_app(SREEnvironment, SREAction, SREObservation)
+app = create_fastapi_app(
+    IncidentCommandCenterEnvironment,
+    IncidentAction,
+    IncidentObservation,
+)
 
 @app.get('/', response_class=HTMLResponse)
 @app.get('/web', response_class=HTMLResponse)

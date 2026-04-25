@@ -20,6 +20,11 @@ portable_mktemp() {
 PING_URL="${1:-}"
 REPO_DIR="${2:-.}"
 
+if [ -z "$PING_URL" ]; then
+  printf "Usage: ./validate-submission.sh <hf_space_url> [repo_dir]\n"
+  exit 1
+fi
+
 log()  { printf "[%s] %b\n" "$(date -u +%H:%M:%S)" "$*"; }
 pass() { log "${GREEN}PASSED${NC} -- $1"; }
 fail() { log "${RED}FAILED${NC} -- $1"; }

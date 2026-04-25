@@ -1,8 +1,8 @@
 ---
-title: Support Ticket Routing
-emoji: 🎫
-colorFrom: blue
-colorTo: indigo
+title: Multi-Agent Incident Command Center
+emoji: 🚨
+colorFrom: red
+colorTo: purple
 sdk: docker
 pinned: false
 app_port: 8000
@@ -11,65 +11,105 @@ tags:
   - openenv
   - reinforcement-learning
   - llm-agents
+  - multi-agent
+  - long-horizon
 ---
 
-# 🎫 Customer Support Ticket Routing Environment
+# 🚨 Multi-Agent Incident Command Center (OpenEnv Round 2)
 
-## 📝 Description and Motivation
-This environment simulates a production-grade customer support triage system. Automated agents are tasked with analyzing raw customer queries and routing them to the appropriate department: **Billing**, **Tech**, or **Sales**. 
+## Problem and Motivation
+This environment simulates incident management for a modern software platform under real operational constraints.
 
-In real-world scenarios, misrouting leads to high churn and operational costs. This benchmark measures the ability of LLM-based agents to perform high-precision classification in a restricted environment compliant with the `openenv-core` SDK.
+The agent must coordinate multiple specialist roles and resolve incidents over long trajectories with partial observability, action costs, and SLA pressure. This targets Round-2 themes:
+- **Theme #1 Multi-Agent Interactions**: triage, investigator, and ops-manager role coordination
+- **Theme #3.1 World Modeling (Professional Tasks)**: realistic logs/metrics/KB workflows
+- **Theme #2 Long-Horizon Planning**: delayed rewards, carry-over constraints, budget-limited sessions
 
-## 🎯 Environment Specification
+## Environment Design
 
 ### Action Space
-- `action_type`: Literal["route", "search"]
-- `department`: Optional[str] — Required for `route` action. Valid values: `"Billing"`, `"Tech"`, `"Sales"`.
+- `inspect_logs(target)`
+- `inspect_metrics(target)`
+- `consult_kb(target)`
+- `negotiate_handoff(target)` where target is one of:
+  - `triage_agent`
+  - `investigator_agent`
+  - `ops_manager_agent`
+- `apply_fix(resolution_summary)`
+- `close_incident(root_cause, resolution_summary)`
 
 ### Observation Space
-- `ticket_id`: Unique tracking ID (e.g., T1, T4).
-- `content`: The raw text string of the customer's request.
-- `search_result`: Contextual data retrieved from the internal database (if the `search` action is invoked).
-- `available_departments`: A list of valid routing targets.
+- `incident_id`, `incident_title`, `incident_description`
+- `visible_signals` (partial clues)
+- `available_actions`, `available_teams`
+- `budget_remaining`, `sla_minutes_remaining`, `incidents_remaining`
+- `terminal_output` (response from world/tool execution)
 
 ### Reward Function
-To facilitate stable training and clear evaluation metrics, this environment uses **strictly bounded rewards**:
-- **0.99**: Correct Department Routing.
-- **0.01**: Incorrect Department Routing.
-- **-0.05**: Search Penalty (Encourages efficiency unless context is truly needed).
+- Dense shaping with delayed completion rewards:
+  - Small penalty for investigation actions to discourage brute-force scanning
+  - Positive reward for discovering new root-cause evidence
+  - Bonus for correct specialist handoff
+  - Positive reward for effective mitigation
+  - Large terminal reward for correct closure (with additional speed bonus)
+  - Strong negative reward for wrong closure, SLA exhaustion, or budget exhaustion
 
-## 🏁 Tasks and Difficulty
-| Task ID | Tickets | Description |
-| :--- | :--- | :--- |
-| `easy` | 1 | Clear keywords (e.g., "Refund", "Invoice"). |
-| `medium` | 2 | Standard conversational support language. |
-| `hard` | 3 | Complex queries involving API logs and technical stack traces. |
+## Task Levels
+- `easy`: 2 incidents
+- `medium`: 3 incidents
+- `hard`: 4 incidents with stricter planning requirements
 
-## 🚀 Setup & Benchmarking
+## Local Setup
 
-### 1. Installation
 ```bash
-pip install openenv-core uvicorn openai
+python -m venv .venv
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-### 2. Run Local Validation
-Ensure your local setup matches the competition requirements:
+### Run environment
+```bash
+python -m server.app
+```
+
+### Run baseline inference
+```bash
+python inference.py
+```
+
+### OpenEnv validation
 ```bash
 openenv validate
 ```
 
-### 3. Run Baseline Inference
-Execute the provided baseline using the Hugging Face Router and the Qwen2.5-72B model:
+## Training Script (TRL)
+This repo includes `train_trl.py` for minimum Round-2 training evidence using Hugging Face TRL.
+
+It does:
+1. Roll out trajectories from a baseline coordinator
+2. Convert trajectories into SFT-style chat examples
+3. Train a compact model with `SFTTrainer`
+4. Evaluate random vs heuristic policy and save plots
+
 ```bash
-export HF_TOKEN="your_huggingface_token"
-python inference.py
+python train_trl.py
 ```
 
-## 🛠️ Technical Architecture
-- **Backend**: Python FastAPI serving `openenv-core` compatible endpoints.
-- **Infrastructure**: Containerized deployment via Docker on Hugging Face Spaces.
-- **Models**: Pydantic-based state and action validation.
+Artifacts are written to `artifacts/`:
+- `reward_curve.png`
+- `summary_metrics.json`
+
+## Hugging Face Space
+After testing locally, deploy this repo as a Docker Space and set `app_port=8000`.
+
+## Submission Checklist
+- [ ] OpenEnv latest runtime and `openenv validate` passing
+- [ ] HF Space URL live and reachable
+- [ ] `train_trl.py` (or Colab equivalent) run with real outputs
+- [ ] Reward/loss plot images committed and linked
+- [ ] 2-minute demo video/blog link added
+- [ ] README links all artifacts and references
 
 ---
-*Submission for the Scaler Meta PyTorch Hackathon.*
-*Environment ID: `support_env` | Powered by OpenEnv SDK.*
+*Environment ID: `incident_command_center_env`*

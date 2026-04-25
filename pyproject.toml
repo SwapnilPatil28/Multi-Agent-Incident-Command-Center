@@ -9,23 +9,21 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-support_env"
+name = "openenv-incident-command-center"
 version = "0.1.0"
-description = "Support Env environment for OpenEnv"
+description = "Multi-agent Incident Command Center environment for OpenEnv"
 requires-python = ">=3.10"
 dependencies = [
-    # Core OpenEnv runtime (provides FastAPI server + HTTP client types)
-    # install from github
-    # "openenv-core[core] @ git+https://github.com/meta-pytorch/OpenEnv.git",
     "openenv-core[core]>=0.2.2",
-    # Environment-specific dependencies
-    # Add all dependencies needed for your environment here
-    # Examples:
-    # "numpy>=1.19.0",
-    # "torch>=2.0.0",
-    # "gymnasium>=0.29.0",
-    # "openspiel>=1.0.0",
-    # "smolagents>=1.22.0,<2",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.7.0",
+    "transformers>=4.44.0",
+    "trl>=0.10.1",
+    "datasets>=2.20.0",
+    "accelerate>=0.33.0",
+    "peft>=0.12.0",
+    "matplotlib>=3.8.0",
 ]
 
 [project.optional-dependencies]
@@ -35,11 +33,10 @@ dev = [
 ]
 
 [project.scripts]
-# Server entry point - enables running via: uv run --project . server
-# or: python -m support_env.server.app
-server = "support_env.server.app:main"
+server = "server.app:main"
+run-baseline = "inference:main"
+run-training = "train_trl:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["support_env", "support_env.server"]
-package-dir = { "support_env" = ".", "support_env.server" = "server" }
+py-modules = ["client", "models", "inference", "train_trl"]

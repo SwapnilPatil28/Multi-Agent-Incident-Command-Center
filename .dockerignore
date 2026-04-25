@@ -5,9 +5,12 @@
 __pycache__
 **/__pycache__
 **/*.pyc
-artifacts/
+# Keep the committed evidence (plots, JSON metrics) so the HF Space dashboard
+# can render them; only exclude the heavy fine-tuned checkpoint directory.
+artifacts/sft_model/
 outputs/
 tests/
 .pytest_cache/
 .cursor
 *.ipynb_checkpoints
+docs/

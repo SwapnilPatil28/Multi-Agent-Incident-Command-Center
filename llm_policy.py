@@ -76,12 +76,32 @@ class LLMPolicy:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path,
-            torch_dtype=torch_dtype,
-        ).to(resolved_device)
+        # transformers renamed torch_dtype -> dtype; try new kwarg first and
+        # fall back for older versions. Works silently on both.
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                dtype=torch_dtype,
+            ).to(resolved_device)
+        except TypeError:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                torch_dtype=torch_dtype,
+            ).to(resolved_device)
         self.model.eval()
         self.device = resolved_device
+
+        # Strip sampling-only fields from the shipped generation_config so
+        # transformers doesn't warn "these flags will be ignored" when we
+        # decode greedily (do_sample=False).
+        gen_config = getattr(self.model, "generation_config", None)
+        if gen_config is not None:
+            for attr in ("temperature", "top_p", "top_k"):
+                if hasattr(gen_config, attr):
+                    try:
+                        setattr(gen_config, attr, None)
+                    except Exception:
+                        pass
 
     # ------------------------------------------------------------------
     # Public API

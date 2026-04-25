@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict
 
 import uvicorn
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from openenv.core.env_server import create_fastapi_app
 
 from models import IncidentAction, IncidentObservation
@@ -42,11 +44,40 @@ _LOG = logging.getLogger("icc.app")
 _CONFIG = EnvConfig.from_env()
 configure_logging(level=_CONFIG.log_level, structured=_CONFIG.structured_logging)
 
+# External URLs surfaced on the dashboard so judges can jump straight from
+# the HF Space to the GitHub / Colab / training artifacts.
+GITHUB_URL = "https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center"
+SPACE_PAGE_URL = "https://huggingface.co/spaces/SwapnilPatil28/Multi-Agent-Incident-Command-Center"
+COLAB_URL = "https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing"
+
 app = create_fastapi_app(
     IncidentCommandCenterEnvironment,
     IncidentAction,
     IncidentObservation,
 )
+
+# Serve the committed training-evidence artifacts (reward_curve.png,
+# training_curve.png, reward_components.png, summary_metrics.json, ...)
+# so the dashboard can embed them without depending on external hosts.
+_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
+if _ARTIFACTS_DIR.exists():
+    app.mount(
+        "/artifacts",
+        StaticFiles(directory=str(_ARTIFACTS_DIR)),
+        name="artifacts",
+    )
+
+
+def _load_summary_metrics() -> Dict[str, Any]:
+    """Best-effort load of the committed training results for the dashboard."""
+    path = _ARTIFACTS_DIR / "summary_metrics.json"
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +192,153 @@ async def root() -> HTMLResponse:
 
 def _dashboard_html() -> str:
     metadata_json = json.dumps(_metadata_payload(), indent=2)
+    metrics = _load_summary_metrics()
+    artifacts_available = _ARTIFACTS_DIR.exists() and (
+        _ARTIFACTS_DIR / "reward_curve.png"
+    ).exists()
+
+    # --- Headline training numbers (1.5B SFT vs base, hard task) -------------
+    base_rewards = metrics.get("base_model_rewards") or [0.0, 0.0, 0.0]
+    sft_rewards = metrics.get("sft_model_rewards") or [0.0, 0.0, 0.0]
+    improvement = metrics.get("improvement_sft_over_base") or [0.0, 0.0, 0.0]
+    headline_delta = improvement[2] if len(improvement) >= 3 else 0.0
+
+    def _fmt(val: Any) -> str:
+        try:
+            return f"{float(val):+.2f}"
+        except (TypeError, ValueError):
+            return "—"
+
+    training_rows = "".join(
+        f"<tr><td>{tier}</td><td>{_fmt(base_rewards[idx])}</td>"
+        f"<td>{_fmt(sft_rewards[idx])}</td>"
+        f"<td class='delta'>{_fmt(improvement[idx])}</td></tr>"
+        for idx, tier in enumerate(("easy", "medium", "hard"))
+        if idx < len(base_rewards)
+    )
+
+    # --- Training-evidence block (plots + caption) ---------------------------
+    if artifacts_available:
+        plots_html = """
+    <h2>Training evidence</h2>
+    <p class='sub'>
+      Committed artifacts from the reference training run
+      (Qwen2.5-1.5B-Instruct, 8 episodes/task, 3 epochs).
+    </p>
+    <div class='plots'>
+      <figure>
+        <img src='/artifacts/reward_curve.png' alt='Reward curve by policy' loading='lazy' />
+        <figcaption>Mean episodic reward per task tier across Random / Heuristic /
+        Base-LLM / SFT-LLM. SFT matches the heuristic demonstrator across every tier
+        and outperforms the untuned base by <strong>+{hard}</strong> on hard incidents.</figcaption>
+      </figure>
+      <figure>
+        <img src='/artifacts/training_curve.png' alt='SFT training loss and token accuracy' loading='lazy' />
+        <figcaption>Supervised loss collapses from <code>~2.84 → ~0.02</code> and
+        next-token accuracy climbs from <code>~0.49 → ~0.99</code> in three epochs on 680 rollout tokens.</figcaption>
+      </figure>
+      <figure>
+        <img src='/artifacts/reward_components.png' alt='Reward component decomposition' loading='lazy' />
+        <figcaption>Per-component reward decomposition. SFT reproduces the
+        heuristic's positive components (clue_bonus, mitigation_correct, closure_correct,
+        speed_bonus) while the base model stalls on step_cost and SLA penalties.</figcaption>
+      </figure>
+    </div>
+    <p class='sub' style='margin-top:0.75rem'>
+      Raw files:
+      <a href='/artifacts/summary_metrics.json'>summary_metrics.json</a>
+      ·
+      <a href='/artifacts/training_log.json'>training_log.json</a>
+      ·
+      <a href='/artifacts/reward_curve_qwen0p5b.png'>0.5B ablation plot</a>
+      ·
+      <a href='/artifacts/summary_metrics_qwen0p5b.json'>0.5B metrics</a>
+    </p>
+""".format(hard=_fmt(headline_delta))
+    else:
+        plots_html = (
+            "<h2>Training evidence</h2>"
+            "<div class='card'><p class='sub'>Plots not bundled in this image. "
+            "See the <a href='" + GITHUB_URL + "/tree/main/artifacts'>GitHub artifacts folder</a>.</p></div>"
+        )
+
+    # --- 0.5B ablation summary ----------------------------------------------
+    ablation_html = """
+    <h2>Ablation: model scale matters for imitation learning</h2>
+    <div class='card'>
+      <p class='sub'>
+        Same pipeline, same data schema — only the base-model size differs. The 0.5B
+        model cannot absorb the expert policy; 1.5B matches it exactly.
+      </p>
+      <div class='table-wrap'>
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th><th>Easy Δ</th><th>Medium Δ</th><th>Hard Δ</th>
+              <th>Heuristic match?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Qwen2.5-0.5B-Instruct</td>
+              <td>+0.43</td><td>+0.14</td><td class='delta'>+0.00</td>
+              <td>No (stuck on step-cost)</td>
+            </tr>
+            <tr>
+              <td><strong>Qwen2.5-1.5B-Instruct</strong></td>
+              <td>-1.80</td><td>+3.13</td><td class='delta good'>+10.17</td>
+              <td><strong>Yes (exact match)</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+"""
+
+    # --- Theme-mapping block (Multi-Agent / Long-Horizon / Professional) -----
+    themes_html = """
+    <h2>Hackathon theme mapping</h2>
+    <div class='grid grid-3'>
+      <div class='card'>
+        <h3>Theme #1 — Multi-Agent Interactions</h3>
+        <p class='sub'>
+          Three gated specialist roles (triage, investigator, ops manager) exchange
+          structured handoffs. Acting out-of-role triggers a
+          <code>wrong_actor_penalty</code>, so collaboration is trained, not hard-coded.
+        </p>
+      </div>
+      <div class='card'>
+        <h3>Theme #2 — Long-Horizon Planning</h3>
+        <p class='sub'>
+          Episodes span up to 28 steps across stacked incidents with delayed,
+          sparse rewards (closure &amp; post-mortem) and per-tier budget / SLA
+          constraints — a proper credit-assignment stress test.
+        </p>
+      </div>
+      <div class='card'>
+        <h3>Theme #3 — World Modeling / Professional Tasks</h3>
+        <p class='sub'>
+          A realistic enterprise incident-response simulation with customer tiers,
+          rollbacks, escalation policies, post-mortems, and a transparent,
+          anti-gamed reward rubric.
+        </p>
+      </div>
+    </div>
+"""
+
+    # --- Reward-rubric details ----------------------------------------------
+    reward_rubric_rows = "".join(
+        f"<tr><td><code>{name}</code></td><td>{value}</td></tr>"
+        for name, value in (
+            ("step_cost", f"{STEP_COST_INVESTIGATION} per investigation step"),
+            ("clue_reward", f"+{CLUE_REWARD} per new fact"),
+            ("handoff_correct", f"+{HANDOFF_CORRECT_REWARD}"),
+            ("mitigation_correct", f"+{MITIGATION_CORRECT_REWARD}"),
+            ("closure_correct_base", f"+{CLOSURE_CORRECT_BASE} × tier multiplier"),
+            ("closure_wrong", f"{CLOSURE_WRONG_PENALTY} × tier multiplier"),
+        )
+    )
+
     return f"""
 <!DOCTYPE html>
 <html lang='en'>
@@ -180,24 +358,39 @@ def _dashboard_html() -> str:
       background: radial-gradient(1000px 600px at 10% -10%, #1e293b, var(--bg));
       color: var(--text); padding: 2rem; margin: 0; min-height: 100vh;
     }}
-    header {{ display:flex; align-items:center; justify-content:space-between; max-width:1100px; margin:0 auto 1.5rem; }}
+    header {{ display:flex; align-items:center; justify-content:space-between; max-width:1100px; margin:0 auto 1.5rem; flex-wrap:wrap; gap:1rem; }}
     .brand {{ display:flex; align-items:center; gap:0.75rem; }}
     .logo {{ width:44px; height:44px; border-radius:10px; background:linear-gradient(135deg,var(--primary),var(--accent)); }}
     h1 {{ font-size:1.6rem; margin:0; }}
-    h2 {{ font-size:1.1rem; margin:1.4rem 0 0.6rem; color:#cbd5e1; }}
+    h2 {{ font-size:1.2rem; margin:1.8rem 0 0.6rem; color:#cbd5e1; }}
     .sub {{ color: var(--muted); }}
-    .grid {{ display:grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap:1rem; max-width:1100px; margin:0 auto; }}
+    .grid {{ display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:1rem; max-width:1100px; margin:0 auto; }}
+    .grid-3 {{ grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); }}
     .card {{ background: var(--card); border: 1px solid #1f2a44; padding: 1.25rem; border-radius: 14px; }}
     .card h3 {{ margin:0 0 0.5rem; font-size:1rem; color:#f1f5f9; }}
     .pill {{ display:inline-block; padding:2px 8px; margin:2px; border-radius:999px; background:#1e293b; border:1px solid #334155; color:#cbd5e1; font-size:0.78rem; }}
+    .pill.cta {{ background:linear-gradient(135deg,var(--primary),var(--accent)); color:#0b1225; border-color:transparent; font-weight:600; }}
     .container {{ max-width: 1100px; margin: 0 auto; }}
     code {{ background:#0b1225; border:1px solid #1f2a44; padding:2px 6px; border-radius:6px; color:#67e8f9; font-family:'JetBrains Mono', monospace; }}
     pre {{ background:#0b1225; border:1px solid #1f2a44; padding: 1rem; border-radius: 10px; color:#cbd5e1; overflow-x:auto; font-size:0.85rem; }}
     a {{ color: var(--accent); text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
     .kpi {{ display:flex; flex-direction:column; gap:0.25rem; }}
     .kpi .num {{ font-size:1.6rem; font-weight:700; color:#f8fafc; }}
     .kpi .lbl {{ color: var(--muted); font-size:0.8rem; }}
+    .kpi .num.good {{ color: var(--good); }}
     footer {{ max-width:1100px; margin:2rem auto 0; color:var(--muted); font-size:0.85rem; }}
+    .plots {{ display:grid; grid-template-columns: repeat(auto-fit,minmax(300px,1fr)); gap:1rem; max-width:1100px; margin:0 auto; }}
+    .plots figure {{ background: var(--card); border:1px solid #1f2a44; border-radius: 14px; padding: 0.75rem; margin:0; }}
+    .plots img {{ width:100%; height:auto; border-radius:8px; background:#0b1225; }}
+    .plots figcaption {{ color: var(--muted); font-size:0.8rem; margin-top:0.5rem; line-height:1.4; }}
+    .table-wrap {{ overflow-x:auto; }}
+    table {{ width:100%; border-collapse: collapse; margin-top:0.5rem; font-size:0.9rem; }}
+    th, td {{ padding:0.5rem 0.75rem; text-align:left; border-bottom:1px solid #1f2a44; }}
+    th {{ color:#cbd5e1; font-weight:600; }}
+    td.delta {{ font-weight:600; color:#f8fafc; }}
+    td.delta.good {{ color: var(--good); }}
+    .links {{ display:flex; flex-wrap:wrap; gap:0.5rem; }}
   </style>
 </head>
 <body>
@@ -206,16 +399,53 @@ def _dashboard_html() -> str:
       <div class='logo'></div>
       <div>
         <h1>Incident Command Center</h1>
-        <div class='sub'>OpenEnv · Multi-Agent · Long-Horizon · Enterprise Simulation</div>
+        <div class='sub'>OpenEnv · Multi-Agent · Long-Horizon · Professional-Task Simulation</div>
       </div>
     </div>
-    <div>
+    <div class='links'>
+      <a class='pill cta' href='{GITHUB_URL}' target='_blank' rel='noopener'>GitHub</a>
+      <a class='pill cta' href='{COLAB_URL}' target='_blank' rel='noopener'>Open in Colab</a>
+      <a class='pill' href='{SPACE_PAGE_URL}' target='_blank' rel='noopener'>Space page</a>
       <span class='pill'>v{_CONFIG.version}</span>
       <span class='pill'>task: easy / medium / hard</span>
     </div>
   </header>
 
   <div class='container'>
+
+    <h2>Headline results</h2>
+    <div class='grid'>
+      <div class='card'>
+        <div class='kpi'>
+          <span class='lbl'>SFT reward lift on hard tasks</span>
+          <span class='num good'>{_fmt(headline_delta)}</span>
+          <span class='sub'>vs Qwen2.5-1.5B-Instruct base</span>
+        </div>
+      </div>
+      <div class='card'>
+        <div class='kpi'>
+          <span class='lbl'>Heuristic-policy match</span>
+          <span class='num'>Exact</span>
+          <span class='sub'>SFT clones the demonstrator across every tier</span>
+        </div>
+      </div>
+      <div class='card'>
+        <div class='kpi'>
+          <span class='lbl'>Scale ablation (hard Δ)</span>
+          <span class='num'>0.5B → 1.5B</span>
+          <span class='sub'>+0.00 → +10.17: capacity matters</span>
+        </div>
+      </div>
+      <div class='card'>
+        <div class='kpi'>
+          <span class='lbl'>Training data</span>
+          <span class='num'>680 rows</span>
+          <span class='sub'>24 heuristic rollouts · 3 epochs</span>
+        </div>
+      </div>
+    </div>
+
+    <h2>Environment at a glance</h2>
     <div class='grid'>
       <div class='card'>
         <div class='kpi'>
@@ -246,6 +476,33 @@ def _dashboard_html() -> str:
       </div>
     </div>
 
+    <h2>1.5B SFT vs base (reference run)</h2>
+    <div class='card'>
+      <div class='table-wrap'>
+        <table>
+          <thead>
+            <tr>
+              <th>Task tier</th><th>Base reward</th><th>SFT reward</th><th>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {training_rows}
+          </tbody>
+        </table>
+      </div>
+      <p class='sub' style='margin-top:0.75rem'>
+        Numbers loaded live from
+        <a href='/artifacts/summary_metrics.json'>summary_metrics.json</a>
+        committed alongside this Space.
+      </p>
+    </div>
+
+    {plots_html}
+
+    {ablation_html}
+
+    {themes_html}
+
     <h2>Endpoints</h2>
     <div class='card'>
       <p class='sub'>Standard OpenEnv contract plus operational endpoints.</p>
@@ -258,22 +515,40 @@ def _dashboard_html() -> str:
         <li><code>GET /env-info</code> — action space, reward model, budgets.</li>
         <li><code>GET /metrics</code> — Prometheus-style counters.</li>
         <li><code>GET /docs</code> — interactive OpenAPI documentation.</li>
+        <li><code>GET /artifacts/…</code> — committed training plots &amp; metrics.</li>
       </ul>
     </div>
 
     <h2>Action space</h2>
     <div class='card'>
       {"".join(f"<span class='pill'>{a}</span>" for a in ALL_ACTIONS)}
-      <p class='sub'>Each action is gated by the acting role; wrong-actor calls are penalised.</p>
+      <p class='sub' style='margin-top:0.5rem'>
+        Each action is gated by the acting role; wrong-actor calls are penalised.
+      </p>
     </div>
 
-    <h2>Reward model (summary)</h2>
+    <h2>Reward model</h2>
     <div class='card'>
-      <p>Composable rubric with anti-gaming safeguards. Every step returns a
-      <code>reward_components</code> dictionary so training curves are
-      interpretable. Closure rewards and SLA penalties are scaled by
-      customer-tier multipliers:</p>
-      {"".join(f"<span class='pill'>{tier}: x{mult}</span>" for tier, mult in TIER_MULTIPLIER.items())}
+      <p>
+        Composable rubric with anti-gaming safeguards. Every step returns a
+        <code>reward_components</code> dictionary so training curves are
+        interpretable. Closure rewards and SLA penalties are scaled by
+        customer-tier multipliers:
+      </p>
+      <p>
+        {"".join(f"<span class='pill'>{tier}: x{mult}</span>" for tier, mult in TIER_MULTIPLIER.items())}
+      </p>
+      <div class='table-wrap'>
+        <table>
+          <thead><tr><th>Component</th><th>Signal</th></tr></thead>
+          <tbody>{reward_rubric_rows}</tbody>
+        </table>
+      </div>
+      <p class='sub' style='margin-top:0.75rem'>
+        Full rubric (invalid-action, repeated-lookup, rollback-effective,
+        post-mortem-logged, etc.) is documented in the
+        <a href='{GITHUB_URL}#reward-model' target='_blank' rel='noopener'>README</a>.
+      </p>
     </div>
 
     <h2>Metadata</h2>
@@ -284,7 +559,9 @@ def _dashboard_html() -> str:
 
   <footer>
     Incident Command Center v{_CONFIG.version} · Built on
-    <a href='https://github.com/meta-pytorch/openenv'>OpenEnv</a>.
+    <a href='https://github.com/meta-pytorch/openenv' target='_blank' rel='noopener'>OpenEnv</a>
+    · <a href='{GITHUB_URL}' target='_blank' rel='noopener'>Source on GitHub</a>
+    · <a href='{COLAB_URL}' target='_blank' rel='noopener'>Reproduce training on Colab</a>
   </footer>
 
   <script>

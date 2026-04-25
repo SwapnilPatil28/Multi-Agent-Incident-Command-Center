@@ -1,14 +1,89 @@
 {
-  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
-  "dataset_rows": 135,
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "dataset_rows": 680,
+  "episodes_per_task": 8,
   "random_rewards": [
-    -3.2300000000000004,
-    -5.53,
-    -7.03
+    -5.96,
+    -11.48,
+    -12.5
   ],
   "heuristic_rewards": [
-    -3.02,
-    -1.6900000000000002,
-    -0.13999999999999996
-  ]
+    -4.72,
+    -0.87,
+    5.89
+  ],
+  "base_model_rewards": [
+    -2.92,
+    -4.0,
+    -4.28
+  ],
+  "sft_model_rewards": [
+    -4.72,
+    -0.87,
+    5.89
+  ],
+  "improvement_sft_over_base": [
+    -1.8,
+    3.13,
+    10.17
+  ],
+  "improvement_heuristic_over_random": [
+    1.24,
+    10.61,
+    18.39
+  ],
+  "reward_components_by_policy": {
+    "random": {
+      "wrong_actor_penalty": -3.12,
+      "closure_wrong": -17.82,
+      "step_cost": -2.61,
+      "postmortem_empty": -1.0,
+      "escalation_not_needed": -0.3,
+      "clue_bonus": 0.48,
+      "handoff_wrong": -0.8,
+      "mitigation_wrong": -2.1,
+      "rollback_ineffective": -1.65,
+      "sla_exhausted": -1.2,
+      "repeated_lookup_penalty": -0.02,
+      "escalation_needed": 0.2
+    },
+    "heuristic": {
+      "step_cost": -2.02,
+      "clue_bonus": 2.52,
+      "handoff_wrong": -0.8,
+      "mitigation_wrong": -2.1,
+      "closure_wrong": -9.9,
+      "repeated_lookup_penalty": -0.16,
+      "handoff_correct": 0.75,
+      "postmortem_logged": 0.35,
+      "mitigation_correct": 2.1,
+      "closure_correct": 7.36,
+      "closure_mitigation_bonus": 1.8,
+      "speed_bonus": 0.6,
+      "postmortem_bonus": 0.6,
+      "closure_under_investigated": -0.8
+    },
+    "base_model": {
+      "step_cost": -5.16,
+      "clue_bonus": 0.24,
+      "repeated_lookup_penalty": -1.24,
+      "sla_exhausted": -5.04
+    },
+    "sft_model": {
+      "step_cost": -2.02,
+      "clue_bonus": 2.52,
+      "handoff_wrong": -0.8,
+      "mitigation_wrong": -2.1,
+      "closure_wrong": -9.9,
+      "repeated_lookup_penalty": -0.16,
+      "handoff_correct": 0.75,
+      "postmortem_logged": 0.35,
+      "mitigation_correct": 2.1,
+      "closure_correct": 7.36,
+      "closure_mitigation_bonus": 1.8,
+      "speed_bonus": 0.6,
+      "postmortem_bonus": 0.6,
+      "closure_under_investigated": -0.8
+    }
+  }
 }

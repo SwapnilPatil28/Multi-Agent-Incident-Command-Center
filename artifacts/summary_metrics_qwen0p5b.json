@@ -1,0 +1,35 @@
+{
+  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "dataset_rows": 255,
+  "episodes_per_task": 3,
+  "random_rewards": [
+    -5.96,
+    -11.48,
+    -12.5
+  ],
+  "heuristic_rewards": [
+    -4.72,
+    -0.87,
+    5.89
+  ],
+  "base_model_rewards": [
+    -2.92,
+    -4.0,
+    -2.4
+  ],
+  "sft_model_rewards": [
+    -2.49,
+    -3.86,
+    -2.4
+  ],
+  "improvement_sft_over_base": [
+    0.43,
+    0.14,
+    0.0
+  ],
+  "improvement_heuristic_over_random": [
+    1.24,
+    10.61,
+    18.39
+  ]
+}

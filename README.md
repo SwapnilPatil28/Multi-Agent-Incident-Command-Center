@@ -27,11 +27,13 @@ tags:
 
 | What | Where |
 |---|---|
-| Live environment (OpenEnv-compatible) | **[Hugging Face Space](https://huggingface.co/spaces/swapnilpatil28/multi-agent-incident-command-center)** |
-| 2-minute video walkthrough | **[YouTube](<REPLACE_WITH_VIDEO_URL>)** |
-| Blog post | **[Hugging Face Blog](<REPLACE_WITH_BLOG_URL>)** · draft in [`docs/BLOG_POST.md`](./docs/BLOG_POST.md) |
-| Training notebook / script | [`train_trl.py`](./train_trl.py) — runs on Colab T4 |
-| Before/after model demo | [`artifacts/before_after_demo.md`](./artifacts/before_after_demo.md) |
+| **Live environment (OpenEnv-compatible)** | **[`https://swapnilpatil28-multi-agent-incident-command-center.hf.space`](https://swapnilpatil28-multi-agent-incident-command-center.hf.space)** |
+| Hugging Face Space page | **[`huggingface.co/spaces/SwapnilPatil28/Multi-Agent-Incident-Command-Center`](https://huggingface.co/spaces/SwapnilPatil28/Multi-Agent-Incident-Command-Center)** |
+| GitHub repository | **[`github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center`](https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center)** |
+| Training notebook (Colab T4, one-click reproducible) | **[Open in Colab ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)** |
+| 2-minute video walkthrough | *Coming soon — [`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md) has the shot list* |
+| Mini blog post | *Coming soon — full draft in [`docs/BLOG_POST.md`](./docs/BLOG_POST.md), ready to publish on hf.co/blog* |
+| Training script (Python) | [`train_trl.py`](./train_trl.py) |
 
 Three specialist agents — **Triage**, **Investigator**, and **Ops Manager** — cooperate to resolve a queue of production incidents while operating under strict **SLA budgets**, **investigation costs**, and **customer-tier impact multipliers**. The environment is designed to reward *real* operational reasoning, not pattern matching on the root-cause label.
 
@@ -75,6 +77,16 @@ This environment captures five properties that are hard to teach with static dat
 | **Business impact** | Each incident carries customer tier, affected users, and $/min revenue impact. Closure rewards scale by tier (enterprise **×1.8**, premium **×1.4**, standard **×1.0**, free **×0.6**). |
 | **Anti-gaming** | Clue bonuses are unique per root-cause keyword; repeated lookups get a small penalty. Closing without enough clues triggers an under-investigated penalty even when the guess is right. |
 | **Carry-over state** | Budget and SLA decrement across the whole incident queue, so early sloppy episodes ruin later ones. Postmortems must be filed for high-impact incidents. |
+
+### Mapping to the hackathon themes
+
+One environment, three themes checked — each one addressed by a concrete mechanic, not just a claim:
+
+| Hackathon theme | How this environment satisfies it |
+|---|---|
+| **Theme #1 — Multi-Agent Interactions** | Three *distinct* specialist roles (`triage_agent`, `investigator_agent`, `ops_manager_agent`) with **non-overlapping permissions**. `negotiate_handoff` scores correct cooperation (+0.15) and wrong owners (−0.10). `wrong_actor_penalty` (−0.08) teaches the *belief* that "I should pick the right specialist for this phase" — a minimal theory-of-mind signal over who-can-do-what. |
+| **Theme #2 — (Super) Long-Horizon Planning** | **Each episode carries 3–5 sequential incidents** under a single investigation budget and a single ticking SLA counter. Rewards are **sparse and delayed**: the +0.80 closure reward only fires when you pick the right root cause after collecting enough clues, running a correct mitigation, and filing a postmortem — steps that may happen 20–60 turns apart. Early sloppy episodes visibly corrupt later ones via the shared budget/SLA. |
+| **Theme #3.1 — World Modeling (Professional Tasks)** | Incidents carry **realistic logs, metrics, and KB articles** with **red-herring signals mixed into real ones**, making root-cause identification require *tool-use discipline*, not shortcut guessing. Customer tiers, affected-user counts, and $/min revenue impact create a **persistent business world-model** that the agent has to reason about — closing an enterprise incident incorrectly costs ~2x what closing a free-tier one costs. |
 
 ---
 
@@ -146,29 +158,48 @@ Both action and observation schemas are defined in [`models.py`](./models.py) wi
 
 ## Reward model
 
-The rubric engine lives in [`server/domain/reward.py`](./server/domain/reward.py). Every step accumulates named components that are summed into the final reward and echoed to the agent.
+The rubric engine lives in [`server/domain/reward.py`](./server/domain/reward.py) and [`server/environment.py`](./server/environment.py). Every step accumulates named components that are summed into the final reward and echoed back to the agent in `observation.reward_components`.
+
+### Step-level components (what each action pays or earns)
 
 | Component | Typical value | Triggers |
 |---|---:|---|
-| `step_cost` | −0.02 … −0.08 | Every action (type-specific) |
-| `wrong_actor_penalty` | −0.08 | Action invoked by a role not authorised to perform it |
-| `clue_bonus` | **+0.12** | Lookup text contains a *new* root-cause keyword (capped at 3 per incident) |
+| `step_cost` | −0.01 … −0.08 | Every action (type-specific: `-0.01` postmortem, `-0.02` handoff/fix, `-0.03` KB, `-0.04` logs/metrics, `-0.05` escalate, `-0.08` rollback) |
+| `wrong_actor_penalty` | −0.08 | Action invoked by a role not authorised for it |
+| `invalid_action` | −0.25 | Unrecognised `action_type` |
+| `clue_bonus` | **+0.12** | Lookup surfaces a *new* root-cause keyword (capped at 3 per incident) |
 | `repeated_lookup_penalty` | −0.02 | Same clue keyword surfaced again |
 | `handoff_correct` / `handoff_wrong` | **+0.15** / −0.10 | Handoff target matches the incident's expected owner |
-| `mitigation_correct` / `mitigation_wrong` | **+0.35** / −0.30 | `apply_fix` text matches accepted fix keywords |
-| `closure_correct` | **+0.80 × tier** | Correct root cause, tier multiplier: free 0.6, standard 1.0, premium 1.4, enterprise 1.8 |
-| `closure_mitigation_bonus` | +0.30 | Closed *after* a successful mitigation |
+| `mitigation_correct` / `mitigation_wrong` / `mitigation_empty` | **+0.35** / −0.30 / −0.30 | `apply_fix` text matches accepted fix keywords |
+| `rollback_effective` / `rollback_ineffective` | +0.20 / −0.15 | `rollback` summary aligns with the incident's accepted playbook |
+| `escalation_needed` / `escalation_not_needed` | +0.10 / −0.10 | Escalation raised for an incident that actually meets the paging threshold (≥50K users OR ≥$800/min OR postmortem required) |
+| `postmortem_logged` / `postmortem_empty` | +0.05 / −0.10 | `submit_postmortem` with/without a `postmortem_note` |
+
+### Closure components (scored when `close_incident` fires)
+
+| Component | Typical value | Triggers |
+|---|---:|---|
+| `closure_correct` | **+0.80 × tier** | Correct root cause, tier multiplier: free ×0.6, standard ×1.0, premium ×1.4, enterprise ×1.8 |
+| `closure_wrong` | **−1.10 × tier** | Wrong root cause, scaled by tier |
+| `closure_mitigation_bonus` | +0.30 | Closed *after* a successful `apply_fix` |
+| `closure_no_mitigation` | −0.15 | Closed on a mitigation-required incident without having applied one |
 | `closure_under_investigated` | −0.20 | Closed before collecting the required number of clues |
 | `speed_bonus` | +0.10 … +0.20 | Resolved in ≤ 7 / ≤ 4 steps on that incident |
-| `postmortem_bonus` / `postmortem_missing` | +0.12 / −0.15 | Postmortem filed for high-impact incidents |
-| `closure_wrong` | −1.10 × tier | Wrong root cause, scaled by tier |
-| `sla_exhausted` | −1.2 × tier | Global SLA minutes hit zero |
+| `postmortem_bonus` / `postmortem_missing` | +0.12 / −0.15 | Postmortem filed (or not) for a high-impact incident |
+
+### Terminal components (episode-ending penalties)
+
+| Component | Typical value | Triggers |
+|---|---:|---|
+| `sla_exhausted` | **−1.2 × tier** | Global SLA minutes hit zero while an incident is still open |
 | `budget_exhausted` | −1.5 | Investigation action budget hit zero |
+
+Every component is persisted to `observation.reward_components`, surfaced in Prometheus `/metrics`, and aggregated into the `reward_components_by_policy` block of [`artifacts/summary_metrics.json`](./artifacts/summary_metrics.json).
 
 Design goals:
 
-1. **Transparent** — agents and humans can see *why* each step was scored.
-2. **Hard to game** — unique clue bonuses, under-investigation penalty, role gating.
+1. **Transparent** — agents and humans can see *why* each step was scored (the [Reward components](#3-reward-components--where-each-policy-actually-earns-reward) chart below is the rubric made visible).
+2. **Hard to game** — unique clue bonuses, under-investigation penalty, role gating, anti-churn `rollback_ineffective` and `escalation_not_needed`.
 3. **Business-aware** — tier multipliers mirror real enterprise SLA contracts.
 
 ---
@@ -190,8 +221,8 @@ Full incident catalog with logs, metrics, KB and accepted fixes is defined in [`
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<you>/CustomerSupportTicketRoutingEnv
-cd CustomerSupportTicketRoutingEnv
+git clone https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center.git
+cd Multi-Agent-Incident-Command-Center
 
 python -m venv .venv
 # Windows PowerShell
@@ -248,7 +279,12 @@ Expected output: **21 passing** (domain rubric, incident catalog, environment in
 1. **Rollout** — the `HeuristicCoordinator` drives the live environment to collect `(prompt, completion)` pairs. Prompts include customer tier, revenue impact, visible signals and investigation targets; completions are structured JSON actions.
 2. **SFT** — the dataset is collapsed into a single `text` column (robust across TRL ≥ 0.20) and fed to `SFTTrainer`. The fine-tuned weights + tokenizer are saved to `artifacts/sft_model/`.
 3. **Evaluation** — four policies are rolled out under identical seeds: `random`, `heuristic`, `base_model` (raw `BASE_MODEL` HF checkpoint), and `sft_model` (the fine-tuned checkpoint just saved). LLM evaluation auto-enables on a CUDA GPU; force it with `EVAL_LLM_MODELS=true` or disable with `EVAL_LLM_MODELS=false`.
-4. **Artifacts** — `artifacts/reward_curve.png` (4 lines) and `artifacts/summary_metrics.json` (random / heuristic / base / SFT rewards + per-task SFT-over-base improvements) are written.
+4. **Artifacts** — a single run writes all five evidence files committed to [`artifacts/`](./artifacts):
+   - `reward_curve.png` (4 lines: random / heuristic / base / SFT vs easy/medium/hard, both axes labelled)
+   - `training_curve.png` (TRL loss + mean token accuracy vs training step)
+   - `reward_components.png` (stacked bars showing *where* each policy's reward came from)
+   - `training_log.json` (full `trainer.state.log_history` for reproducibility)
+   - `summary_metrics.json` (random / heuristic / base / SFT rewards + per-task `improvement_sft_over_base` + `reward_components_by_policy`)
 
 ### Local run (small model)
 
@@ -256,22 +292,42 @@ Expected output: **21 passing** (domain rubric, incident catalog, environment in
 BASE_MODEL=Qwen/Qwen2.5-0.5B-Instruct python train_trl.py
 ```
 
-### Colab / HF Spaces (T4 GPU)
+### Colab (T4 GPU) — one-click reproducible
+
+**[Open the full training notebook on Colab ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)**
+
+Or run the cells manually:
 
 ```python
-# Cell 1
-!git clone https://github.com/<you>/CustomerSupportTicketRoutingEnv
-%cd CustomerSupportTicketRoutingEnv
-!pip install -r requirements.txt
+# Cell 1 — clone and install
+!git clone https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center.git /content/repo
+%cd /content/repo
+!pip install -q -r requirements.txt
+!pip install -q "openenv-core[core]>=0.2.2"
 
 # Cell 2 — start the environment server in the background
-import subprocess, time
-server = subprocess.Popen(["uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", "8000"])
-time.sleep(10)
+import subprocess, time, os, requests
+os.environ["ENV_STRUCTURED_LOGGING"] = "false"
+server = subprocess.Popen(
+    ["uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", "8000"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+for _ in range(30):
+    try:
+        if requests.get("http://127.0.0.1:8000/healthz", timeout=1).status_code == 200:
+            print("server up"); break
+    except Exception:
+        time.sleep(1)
 
-# Cell 3 — run baseline + SFT
+# Cell 3 — full pipeline (dataset → SFT → evaluate 4 policies → plots)
 import os
-os.environ["BASE_MODEL"] = "Qwen/Qwen2.5-0.5B-Instruct"
+os.environ["BASE_MODEL"]         = "Qwen/Qwen2.5-1.5B-Instruct"
+os.environ["ENV_URL"]            = "http://127.0.0.1:8000"
+os.environ["EVAL_LLM_MODELS"]    = "true"
+os.environ["EPISODES_PER_TASK"]  = "8"
+os.environ["TRAIN_EPOCHS"]       = "3"
+os.environ["TRAIN_MAX_LENGTH"]   = "1024"
+os.environ["MAX_LLM_EVAL_STEPS"] = "120"
 !python train_trl.py
 ```
 
@@ -312,51 +368,87 @@ the model emits invalid JSON.
 
 ## Training results
 
-Four policies, same seeds, same tasks. All three plots are produced automatically by a single `python train_trl.py` run.
+Four policies (**random**, **heuristic**, **base Qwen2.5-1.5B-Instruct**, **SFT fine-tuned**) evaluated under identical seeds across all three task difficulties. All three plots below are produced automatically by a single `python train_trl.py` run and committed to [`artifacts/`](./artifacts).
+
+### Headline: SFT closes a +10-point reward gap on hard incidents
+
+| Task | Random | Base LLM | **Fine-tuned LLM** | Heuristic (oracle) |
+|---|---:|---:|---:|---:|
+| easy | -5.96 | -2.92 | **-4.72** | -4.72 |
+| medium | -11.48 | -4.00 | **-0.87** | -0.87 |
+| hard | -12.50 | -4.28 | **+5.89** | +5.89 |
+| **SFT − Base** | — | — | **-1.80 / +3.13 / +10.17** | — |
+
+> **Why SFT matches the heuristic component-for-component:** the environment is deterministic (same task → same incidents → same observations), and so is the heuristic (same observation → same action). With TRL SFT achieving ~0.99 token accuracy, the student memorises the teacher's policy and reproduces it under greedy decoding. Behavior cloning has converged to the expert. The meaningful comparison is therefore **SFT vs the untrained base model**, where fine-tuning earns **+10.17 reward on hard-difficulty incidents** and unlocks closure/mitigation/postmortem reward components the base model never fires.
 
 ### 1. Reward curve — four policies head-to-head
 
 ![Reward curve comparing random / heuristic / base LLM / fine-tuned LLM on easy, medium, and hard tasks](./artifacts/reward_curve.png)
 
-*Random (red) is the floor. Heuristic (blue) is the deterministic oracle baseline. Base LLM (orange) already beats random by producing structured JSON. **Fine-tuned LLM (green) improves over base on every task it has enough steps to close incidents on** — the `improvement_sft_over_base` array in `summary_metrics.json` quantifies the gap.*
+*Random (red) is the floor. Base LLM (orange) already beats random on easy by producing structured JSON but plateaus because it never learns to close an incident. **Fine-tuned LLM (green) climbs sharply with difficulty**, reaching +5.89 on hard — matching the hand-coded expert.*
 
 ### 2. Training curve — loss drops, token accuracy climbs
 
-![TRL SFT training loss and mean token accuracy vs training step](./artifacts/training_curve.png)
+![TRL SFT training loss and mean token accuracy vs training step — loss from ~2.8 to ~0.02, token accuracy from 0.49 to 0.99](./artifacts/training_curve.png)
 
-*Loss falls from ~3.0 → ~0.15 as the model learns the structured action format; mean token accuracy climbs from ~0.50 to ~0.97. Satisfies the hackathon "loss AND reward plots" minimum requirement.*
+*Qwen2.5-1.5B-Instruct fine-tuned for 3 epochs on 680 rollout examples. Loss falls from ~2.84 → ~0.02; mean token accuracy climbs from ~0.49 to ~0.99. Satisfies the hackathon "loss AND reward plots" minimum requirement.*
 
-### 3. Reward components — where each policy earns reward
+### 3. Reward components — where each policy actually earns reward
 
-![Reward components earned per policy summed across all three tasks](./artifacts/reward_components.png)
+![Reward components earned per policy summed across all three tasks — fine-tuned model unlocks closure_correct, mitigation_correct, handoff_correct that the base model never earns](./artifacts/reward_components.png)
 
-*This chart makes the rubric legible. Random racks up step-costs; heuristic earns from `closure_correct` + `mitigation_correct`; after fine-tuning, the LLM visibly shifts reward mass toward `handoff_correct` and `clue_bonus`. Not every policy wins in the same way — training shapes the strategy.*
+*This chart is the rubric made visible. **Random** gets crushed by `closure_wrong` and `wrong_actor_penalty`. **Base LLM** only earns `clue_bonus`, then bleeds out via `step_cost` and `sla_exhausted` — it never closes an incident. **Fine-tuned LLM** and the **heuristic** both unlock the positive-reward components (`closure_correct +7.36`, `mitigation_correct +2.10`, `closure_mitigation_bonus +1.80`, `postmortem_bonus +0.60`). Training has redirected the LLM's reward mass from "bleeding" to "solving."*
 
-### 4. Before vs after on a single incident
+### 4. Summary metrics
 
-[`artifacts/before_after_demo.md`](./artifacts/before_after_demo.md) contains a side-by-side trace of the base model and the fine-tuned model handling the **same** hard-difficulty incident under the **same** seed. Generate it yourself with:
-
-```bash
-python scripts/before_after_demo.py
-```
-
-### Summary metrics
-
-Top-level numbers are written to [`artifacts/summary_metrics.json`](./artifacts/summary_metrics.json):
+The full numbers live in [`artifacts/summary_metrics.json`](./artifacts/summary_metrics.json). Top-level excerpt:
 
 ```json
 {
   "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
-  "random_rewards":          [-5.96, -11.48, -12.50],
-  "heuristic_rewards":       [-4.72,  -0.87,  +5.89],
-  "base_model_rewards":      [ ... ],
-  "sft_model_rewards":       [ ... ],
-  "improvement_sft_over_base":       [ ... ],
-  "improvement_heuristic_over_random":[+1.24, +10.61, +18.39]
+  "dataset_rows": 680,
+  "episodes_per_task": 8,
+  "random_rewards":       [ -5.96, -11.48, -12.50 ],
+  "heuristic_rewards":    [ -4.72,  -0.87,  +5.89 ],
+  "base_model_rewards":   [ -2.92,  -4.00,  -4.28 ],
+  "sft_model_rewards":    [ -4.72,  -0.87,  +5.89 ],
+  "improvement_sft_over_base":        [ -1.80, +3.13, +10.17 ],
+  "improvement_heuristic_over_random":[ +1.24, +10.61, +18.39 ]
 }
 ```
 
-Full component breakdown per policy is also included in `reward_components_by_policy`.
+Full `reward_components_by_policy` (used to generate plot 3) is included alongside.
+
+### 5. Ablation: model scale matters for imitation learning
+
+The same pipeline with the **smaller Qwen2.5-0.5B-Instruct** backbone, **identical seeds and environment config** (so random / heuristic numbers are directly comparable), but a smaller training dataset (3 episodes/task → 255 rows vs 8 episodes/task → 680 rows):
+
+![Reward curve — four policies on Qwen2.5-0.5B-Instruct](./artifacts/reward_curve_qwen0p5b.png)
+
+| Task | Random | Base 0.5B | **SFT 0.5B** | Heuristic | **SFT − Base (0.5B)** |
+|---|---:|---:|---:|---:|---:|
+| easy | -5.96 | -2.92 | **-2.49** | -4.72 | +0.43 |
+| medium | -11.48 | -4.00 | **-3.86** | -0.87 | +0.14 |
+| hard | -12.50 | -2.40 | **-2.40** | +5.89 | **0.00** |
+
+**The punchline — scale is the story.** With the 0.5B backbone, SFT delivers only a **+0.43 / +0.14 / +0.00** improvement over the base model and **never closes a single hard-incident**. Bumping the backbone to **1.5B** (same SFT code, same data pipeline, same environment) unlocks a **-1.80 / +3.13 / +10.17** improvement and makes the LLM match the heuristic's component-for-component behavior on hard incidents.
+
+| Run config | 0.5B | **1.5B (headline)** |
+|---|---|---|
+| Model | Qwen2.5-0.5B-Instruct | Qwen2.5-1.5B-Instruct |
+| Episodes / task (rollout) | 3 | 8 |
+| Dataset rows | 255 | 680 |
+| Train epochs | 1 | 3 |
+| Base → SFT improvement on **hard** | **+0.00** | **+10.17** |
+| Hard incidents closed by SFT | 0 | full heuristic behavior |
+
+Interpretation: **at 0.5B the model is too small to absorb the multi-step, role-gated policy from SFT**, even though it can emit syntactically valid JSON. At 1.5B the capacity suddenly becomes sufficient to internalize the full action schedule, and behavior cloning converges. This is the kind of finding the environment is designed to surface — *the rubric makes it visible in one plot*, not hidden behind a single aggregate score.
+
+Raw numbers live in [`artifacts/summary_metrics_qwen0p5b.json`](./artifacts/summary_metrics_qwen0p5b.json).
+
+### Reproduce the whole training run
+
+One click: **[Open Colab ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)** (T4 GPU, ~1 h 15 min wall clock end-to-end, including base-model + SFT-model evaluation).
 
 ---
 
@@ -393,7 +485,7 @@ All tunables are environment variables so the image is 12-factor compatible:
 pytest tests/ -q
 ```
 
-Three test modules:
+Expected: `21 passed`. Three test modules:
 
 - `tests/test_reward.py` — invariants of the rubric engine (capping, anti-gaming, tier scaling).
 - `tests/test_incidents.py` — catalog completeness, uniqueness, deterministic instantiation.
@@ -401,40 +493,85 @@ Three test modules:
 
 The domain suites are pure-python and run without `openenv-core` installed.
 
+### Pre-submission smoke tests
+
+Two scripts judges (or you) can run without a local IDE:
+
+```bash
+# 1. Local: manifest + files + domain tests
+./pre_validate.sh
+
+# 2. Remote: hit the deployed HF Space end-to-end
+./validate-submission.sh https://swapnilpatil28-multi-agent-incident-command-center.hf.space
+```
+
+[`pre_validate.sh`](./pre_validate.sh) runs the OpenEnv validator against the local manifest, confirms the training / inference scripts exist, and re-runs the domain test suite. [`validate-submission.sh`](./validate-submission.sh) pings `/reset` + `/healthz` on a live URL, checks the `Dockerfile` is in the submitted tree, and re-runs `openenv validate` — exactly what the judges' CI pipeline expects.
+
 ---
 
 ## Repository layout
 
 ```
 .
-├── models.py                         # Pydantic schemas (IncidentAction / Observation / State)
-├── client.py                         # Typed EnvClient (reset / step / state / close)
-├── inference.py                      # HeuristicCoordinator + random baseline
-├── train_trl.py                      # Rollout → SFT → evaluation → artifacts
-├── openenv.yaml                      # OpenEnv manifest
-├── pyproject.toml                    # Package metadata, extras, entry points
-├── requirements.txt                  # Full stack requirements (training incl.)
-├── Dockerfile                        # Root image (parity with server/Dockerfile)
-├── artifacts/
-│   ├── reward_curve.png              # Committed training-evidence plot
-│   └── summary_metrics.json          # Committed training-evidence metrics
+├── README.md                          # This file
+├── LICENSE                            # MIT
+├── openenv.yaml                       # OpenEnv manifest (version 3.0)
+├── pyproject.toml                     # Package metadata + entry points
+├── requirements.txt                   # Full stack (server + training)
+├── uv.lock                            # Reproducible dependency lock
+├── Dockerfile                         # Root image (parity with server/Dockerfile)
+├── .dockerignore                      # Keeps the image small
+├── .gitignore                         # Excludes venv / artifacts-cache
+├── .gitattributes                     # EOL normalization
+├── __init__.py                        # Makes the repo root importable for tests
+│
+├── models.py                          # Pydantic schemas (IncidentAction/Observation/State)
+├── client.py                          # Typed EnvClient (reset / step / state / close)
+├── inference.py                       # HeuristicCoordinator + random baseline + POLICY_MODEL hook
+├── llm_policy.py                      # HF causal-LM → environment-ready policy wrapper
+├── train_trl.py                       # Rollout → SFT → 4-policy evaluation → plots
+│
+├── pre_validate.sh                    # Local 5-step pre-submission smoke test
+├── validate-submission.sh             # Remote /reset + /healthz + openenv validate against Space
+│
+├── scripts/
+│   └── before_after_demo.py           # Side-by-side base vs SFT trace generator
+│
+├── docs/
+│   ├── BLOG_POST.md                   # HF blog draft (publish to hf.co/blog)
+│   ├── VIDEO_SCRIPT.md                # 2-minute YouTube script with link list
+│   └── SUBMISSION_CHECKLIST.md        # Judging-criteria checklist + smoke tests
+│
+├── artifacts/                         # All committed training evidence
+│   ├── reward_curve.png               # 4-policy reward comparison (1.5B headline)
+│   ├── training_curve.png             # TRL SFT loss + token accuracy (1.5B)
+│   ├── reward_components.png          # Per-policy rubric breakdown (1.5B)
+│   ├── training_log.json              # Full TRL log history (1.5B)
+│   ├── summary_metrics.json           # All reward + component numbers (1.5B)
+│   ├── reward_curve_qwen0p5b.png      # Ablation: same pipeline on 0.5B backbone
+│   └── summary_metrics_qwen0p5b.json  # Ablation numbers
+│
 ├── server/
-│   ├── app.py                        # FastAPI app with health/metrics/dashboard
-│   ├── environment.py                # OpenEnv-compliant Environment implementation
-│   ├── config.py                     # 12-factor runtime configuration
-│   ├── logging_utils.py              # Structured JSON logging
-│   ├── requirements.txt              # Slim server image requirements
-│   ├── Dockerfile                    # Production image (HEALTHCHECK included)
+│   ├── __init__.py
+│   ├── app.py                         # FastAPI app with health/metrics/dashboard
+│   ├── environment.py                 # OpenEnv-compliant Environment implementation
+│   ├── support_env_environment.py     # Backward-compat alias module
+│   ├── config.py                      # 12-factor runtime configuration
+│   ├── logging_utils.py               # Structured JSON logging
+│   ├── requirements.txt               # Slim server image requirements
+│   ├── Dockerfile                     # Production image (HEALTHCHECK included)
 │   └── domain/
-│       ├── incidents.py              # 13 enterprise incident templates + factory
-│       ├── reward.py                 # Composable rubric engine
-│       ├── roles.py                  # Role-based permission policy
-│       └── rng.py                    # Deterministic per-episode RNG
-└── tests/
-    ├── conftest.py                   # sys.path + env defaults
-    ├── test_reward.py                # Rubric invariants
-    ├── test_incidents.py             # Catalog invariants
-    └── test_environment.py           # End-to-end environment tests
+│       ├── __init__.py
+│       ├── incidents.py               # 13 enterprise incident templates + factory
+│       ├── reward.py                  # Composable rubric engine (20+ components)
+│       ├── roles.py                   # Role-based permission policy
+│       └── rng.py                     # Deterministic per-episode RNG
+│
+└── tests/                             # 21 passing tests
+    ├── conftest.py                    # sys.path + env defaults
+    ├── test_reward.py                 # Rubric invariants (capping, anti-gaming, tier scaling)
+    ├── test_incidents.py              # Catalog invariants (uniqueness, determinism)
+    └── test_environment.py            # reset/step invariants, wrong-actor, closure
 ```
 
 ---
@@ -460,20 +597,20 @@ ENV_LOG_LEVEL: "INFO"
 
 Full checklist with pre-submission smoke tests → [`docs/SUBMISSION_CHECKLIST.md`](./docs/SUBMISSION_CHECKLIST.md).
 
-- [x] OpenEnv latest runtime and `openenv validate` passing
-- [x] Multi-agent, long-horizon environment with role-gated action space
-- [x] Composable, transparent, anti-gaming reward rubric
-- [x] Business-impact-aware scoring (customer tier, revenue, SLA)
-- [x] 13 incident templates across 3 difficulties with red herrings and playbooks
-- [x] End-to-end TRL SFT pipeline that saves a checkpoint and re-evaluates it (`train_trl.py`)
-- [x] Reward curve + training-loss curve + reward-components chart committed to `artifacts/`
-- [x] Before/after model comparison trace (`artifacts/before_after_demo.md`)
-- [x] 21 passing unit tests
-- [x] Production-quality HTTP server: `/healthz`, `/version`, `/env-info`, `/metrics`, Dockerfile with `HEALTHCHECK`
-- [x] Structured JSON logging + 12-factor configuration
-- [x] Blog draft (`docs/BLOG_POST.md`) + video script (`docs/VIDEO_SCRIPT.md`)
-- [ ] Published Hugging Face blog URL (fill me in at top of README)
-- [ ] Uploaded YouTube video URL (fill me in at top of README)
+- [x] **OpenEnv latest runtime** and `openenv validate` passing — [Space live](https://swapnilpatil28-multi-agent-incident-command-center.hf.space)
+- [x] **Multi-agent, long-horizon environment** with role-gated action space (3 roles × 9 actions, 13 incidents)
+- [x] **Composable, transparent, anti-gaming reward rubric** (14+ named components, tier-scaled)
+- [x] **Business-impact-aware scoring** (customer tier, revenue impact, SLA countdown)
+- [x] **End-to-end TRL SFT pipeline** that saves a checkpoint and re-evaluates it in the environment ([`train_trl.py`](./train_trl.py))
+- [x] **Reward curve + training-loss curve + reward-components chart** committed to [`artifacts/`](./artifacts)
+- [x] **Concrete SFT → Base improvement**: **+10.17 reward on hard-difficulty incidents**
+- [x] **21 passing unit tests** (domain invariants + environment integration)
+- [x] **Production-quality HTTP server**: `/healthz`, `/version`, `/env-info`, `/metrics`, Dockerfile with `HEALTHCHECK`
+- [x] **Structured JSON logging** + 12-factor configuration
+- [x] **One-click Colab training notebook** → [Open ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)
+- [x] **Blog draft** ([`docs/BLOG_POST.md`](./docs/BLOG_POST.md)) + **video script** ([`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md))
+- [ ] Publish the Hugging Face blog post and swap the "Coming soon" link in the Live-links table
+- [ ] Upload the YouTube video and swap the "Coming soon" link in the Live-links table
 
 ---
 

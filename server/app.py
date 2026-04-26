@@ -45,10 +45,19 @@ _CONFIG = EnvConfig.from_env()
 configure_logging(level=_CONFIG.log_level, structured=_CONFIG.structured_logging)
 
 # External URLs surfaced on the dashboard so judges can jump straight from
-# the HF Space to the GitHub / Colab / training artifacts.
+# the HF Space to the GitHub / Colab / docs / training artifacts.
 GITHUB_URL = "https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center"
 SPACE_PAGE_URL = "https://huggingface.co/spaces/SwapnilPatil28/Multi-Agent-Incident-Command-Center"
+SPACE_APP_URL = "https://swapnilpatil28-multi-agent-incident-command-center.hf.space"
 COLAB_URL = "https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing"
+# Dashboard doc links point at the Hugging Face Space copies of the docs (not
+# GitHub) so a judge who opens the Space stays inside the HF ecosystem. The
+# README on the Space page is rendered directly, so we point at the Space
+# root for it; the other three open the HF file browser.
+README_URL = SPACE_PAGE_URL
+BLOG_POST_URL = f"{SPACE_PAGE_URL}/blob/main/docs/BLOG_POST.md"
+VIDEO_SCRIPT_URL = f"{SPACE_PAGE_URL}/blob/main/docs/VIDEO_SCRIPT.md"
+SUBMISSION_CHECKLIST_URL = f"{SPACE_PAGE_URL}/blob/main/docs/SUBMISSION_CHECKLIST.md"
 
 app = create_fastapi_app(
     IncidentCommandCenterEnvironment,
@@ -313,36 +322,9 @@ def _dashboard_html() -> str:
     </div>
 """
 
-    # --- Theme-mapping block (Multi-Agent / Long-Horizon / Professional) -----
-    themes_html = """
-    <h2>Hackathon theme mapping</h2>
-    <div class='grid grid-3'>
-      <div class='card'>
-        <h3>Theme #1 — Multi-Agent Interactions</h3>
-        <p class='sub'>
-          Three gated specialist roles (triage, investigator, ops manager) exchange
-          structured handoffs. Acting out-of-role triggers a
-          <code>wrong_actor_penalty</code>, so collaboration is trained, not hard-coded.
-        </p>
-      </div>
-      <div class='card'>
-        <h3>Theme #2 — Long-Horizon Planning</h3>
-        <p class='sub'>
-          Episodes span up to 28 steps across stacked incidents with delayed,
-          sparse rewards (closure &amp; post-mortem) and per-tier budget / SLA
-          constraints — a proper credit-assignment stress test.
-        </p>
-      </div>
-      <div class='card'>
-        <h3>Theme #3 — World Modeling / Professional Tasks</h3>
-        <p class='sub'>
-          A realistic enterprise incident-response simulation with customer tiers,
-          rollbacks, escalation policies, post-mortems, and a transparent,
-          anti-gamed reward rubric.
-        </p>
-      </div>
-    </div>
-"""
+    # Theme mapping now lives in the top story block — keep this var empty
+    # so the existing `{themes_html}` slot renders to nothing (no duplication).
+    themes_html = ""
 
     # --- Reward-rubric details ----------------------------------------------
     reward_rubric_rows = "".join(
@@ -398,19 +380,20 @@ def _dashboard_html() -> str:
     .kpi .lbl {{ color: var(--muted); font-size:0.8rem; }}
     .kpi .num.good {{ color: var(--good); }}
     footer {{ max-width:1200px; margin:2rem auto 0; color:var(--muted); font-size:0.85rem; }}
-    /* Training-evidence plots: one plot per row, full content width,
-       so dense charts (reward curves, stacked bars) stay readable. */
-    .plots {{ display:flex; flex-direction:column; gap:1.5rem; max-width:1200px; margin:0 auto; }}
-    .plots figure {{ background: var(--card); border:1px solid #1f2a44; border-radius: 14px; padding: 1.25rem; margin:0; }}
+    /* Training-evidence plots: one plot per row, centred, with a tighter
+       max-width so the charts read as compact figures rather than banners.
+       Click the image to open the full-resolution PNG in a new tab. */
+    .plots {{ display:flex; flex-direction:column; gap:1.25rem; max-width:1200px; margin:0 auto; }}
+    .plots figure {{ background: var(--card); border:1px solid #1f2a44; border-radius: 14px; padding: 1rem 1.25rem; margin:0; }}
     .plots figure a {{ display:block; }}
     .plots img {{
       width:100%; height:auto; display:block;
-      max-width:1100px; margin:0 auto;
+      max-width:720px; margin:0 auto;
       border-radius:10px; background:#0b1225;
       transition: transform 0.2s ease;
     }}
     .plots img:hover {{ transform: scale(1.01); }}
-    .plots figcaption {{ color: var(--muted); font-size:0.9rem; margin-top:0.75rem; line-height:1.55; text-align:center; max-width:1000px; margin-left:auto; margin-right:auto; }}
+    .plots figcaption {{ color: var(--muted); font-size:0.9rem; margin-top:0.6rem; line-height:1.55; text-align:center; max-width:720px; margin-left:auto; margin-right:auto; }}
     .table-wrap {{ overflow-x:auto; }}
     table {{ width:100%; border-collapse: collapse; margin-top:0.5rem; font-size:0.9rem; }}
     th, td {{ padding:0.5rem 0.75rem; text-align:left; border-bottom:1px solid #1f2a44; }}
@@ -418,6 +401,39 @@ def _dashboard_html() -> str:
     td.delta {{ font-weight:600; color:#f8fafc; }}
     td.delta.good {{ color: var(--good); }}
     .links {{ display:flex; flex-wrap:wrap; gap:0.5rem; }}
+
+    /* "Story in 2 minutes" hero panel — plain-English summary for judges. */
+    .hero-card {{
+      background: linear-gradient(135deg, #0f2647 0%, #172a4a 60%, #1f2a44 100%);
+      border: 1px solid #1f2a44; border-radius: 16px;
+      padding: 1.75rem 1.75rem 1.5rem; margin: 0 auto 1.5rem;
+      max-width: 1200px; box-shadow: 0 6px 30px rgba(34,211,238,0.08);
+    }}
+    .hero-card h2 {{ font-size:1.35rem; margin:0 0 0.4rem; color:#f1f5f9; }}
+    .hero-card h3 {{ font-size:1rem; color:#e2e8f0; margin:0 0 0.3rem; }}
+    .hero-card .lede {{
+      font-size:1.02rem; line-height:1.6; color:#e2e8f0;
+      background:#0b1225; border-left: 3px solid var(--accent);
+      padding: 0.9rem 1.1rem; border-radius: 6px; margin: 0.3rem 0 0;
+    }}
+    .hero-card .lede strong {{ color:#f8fafc; }}
+    .hero-card table {{ font-size:0.92rem; }}
+    .hero-card .card {{ background: #0e1a30; }}
+
+    /* "Resources & documentation" click-through cards. */
+    .res-card {{
+      display:block; color: var(--text); text-decoration:none;
+      background: var(--card); border:1px solid #1f2a44; border-radius:12px;
+      padding: 1rem 1.1rem;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }}
+    .res-card:hover {{
+      border-color: var(--accent); transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(34,211,238,0.12);
+      text-decoration:none;
+    }}
+    .res-icon {{ font-size:1.6rem; line-height:1; margin-bottom:0.5rem; }}
+    .res-title {{ font-weight:600; color:#f1f5f9; margin-bottom:0.2rem; }}
   </style>
 </head>
 <body>
@@ -432,13 +448,153 @@ def _dashboard_html() -> str:
     <div class='links'>
       <a class='pill cta' href='{GITHUB_URL}' target='_blank' rel='noopener'>GitHub</a>
       <a class='pill cta' href='{COLAB_URL}' target='_blank' rel='noopener'>Open in Colab</a>
-      <a class='pill' href='{SPACE_PAGE_URL}' target='_blank' rel='noopener'>Space page</a>
+      <a class='pill cta' href='{README_URL}' target='_blank' rel='noopener'>README</a>
+      <a class='pill cta' href='{BLOG_POST_URL}' target='_blank' rel='noopener'>Blog post</a>
+      <a class='pill' href='{SPACE_PAGE_URL}' target='_blank' rel='noopener'>HF Space page</a>
       <span class='pill'>v{_CONFIG.version}</span>
       <span class='pill'>task: easy / medium / hard</span>
     </div>
   </header>
 
   <div class='container'>
+
+    <!-- ============================================================ -->
+    <!-- PART 1 — Plain-English story for non-technical judges        -->
+    <!-- ============================================================ -->
+    <div class='hero-card'>
+      <h2 style='margin-top:0'>🚨 The story in 2 minutes</h2>
+      <p class='lede'>
+        When a real tech company has an outage, <strong>three people's phones
+        buzz at once</strong> — a Triage engineer, an Investigator, and an Ops
+        Manager. They have to cooperate under a ticking <strong>SLA clock</strong>,
+        every action costs <strong>budget</strong>, and every wrong call costs
+        <strong>real money</strong> (enterprise outages hurt ~3× more than free-tier).
+        <br /><br />
+        We built a simulator of that war room — and we fine-tuned an LLM to run it
+        <strong>as well as the human expert</strong>.
+      </p>
+
+      <h3 style='margin-top:1.25rem'>What is the environment?</h3>
+      <p class='sub' style='margin:0 0 0.75rem'>
+        Three specialist agents with <strong>different permissions</strong> resolve
+        a live queue of 13 realistic tech incidents across 3 difficulty tiers.
+      </p>
+      <div class='table-wrap'>
+        <table>
+          <thead>
+            <tr><th>Role</th><th>Can do</th><th>Cannot do</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>🔍 <strong>Triage</strong></td>
+              <td>Pull logs · check metrics · consult KB</td>
+              <td>Close a ticket</td>
+            </tr>
+            <tr>
+              <td>🧪 <strong>Investigator</strong></td>
+              <td>Apply a fix · roll back a deploy</td>
+              <td>Escalate or file a post-mortem</td>
+            </tr>
+            <tr>
+              <td>👷 <strong>Ops Manager</strong></td>
+              <td>Escalate · file post-mortem · <strong>close the ticket</strong></td>
+              <td>Apply a code fix</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style='margin-top:1.25rem'>What did the agent learn?</h3>
+      <p class='sub' style='margin:0'>
+        Not "pick the right label." It learned a whole workflow — dig up clues,
+        hand off to the right specialist, apply the correct fix, respect the SLA,
+        file the post-mortem, close the ticket. The rubric makes every piece of
+        that workflow <em>visible</em> as a named reward component, so you can
+        see <em>why</em> the agent earned (or lost) points at every step.
+      </p>
+
+      <h3 style='margin-top:1.25rem'>Why it matters for the 3 hackathon themes</h3>
+      <div class='grid grid-3'>
+        <div class='card'>
+          <h3>🤝 Theme #1 — Multi-Agent</h3>
+          <p class='sub'>
+            Three distinct roles with <strong>non-overlapping permissions</strong>.
+            Wrong-actor calls → <code>-0.08</code>. Correct handoff → <code>+0.15</code>.
+            Cooperation is <em>trained</em>, not hard-coded.
+          </p>
+        </div>
+        <div class='card'>
+          <h3>⏱️ Theme #2 — Long-Horizon</h3>
+          <p class='sub'>
+            Each episode runs <strong>3–5 sequential incidents</strong> over 20–60
+            steps with a single ticking SLA clock. Big rewards (+0.80 × tier) only
+            fire after clues → fix → post-mortem. Sparse and delayed by design.
+          </p>
+        </div>
+        <div class='card'>
+          <h3>🏢 Theme #3 — Professional World-Model</h3>
+          <p class='sub'>
+            Real logs, metrics, KB articles, red-herring signals, customer tiers,
+            SLA timers, revenue impact. Close an enterprise ticket wrong and it
+            hurts ~3× what a free-tier one does.
+          </p>
+        </div>
+      </div>
+
+      <p class='sub' style='margin-top:1rem;font-style:italic'>
+        ↓ Keep scrolling for the headline numbers, training plots, ablation, and
+        the full rubric. Or jump straight to the
+        <a href='{README_URL}' target='_blank' rel='noopener'>README</a> or the
+        <a href='{BLOG_POST_URL}' target='_blank' rel='noopener'>blog post</a>.
+      </p>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Resources & documentation — every link the judges need       -->
+    <!-- ============================================================ -->
+    <h2>Resources &amp; documentation</h2>
+    <div class='grid grid-3'>
+      <a class='res-card' href='{GITHUB_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>💻</div>
+        <div class='res-title'>GitHub repository</div>
+        <div class='sub'>Full source, tests, Dockerfile, CI-ready</div>
+      </a>
+      <a class='res-card' href='{SPACE_PAGE_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>🤗</div>
+        <div class='res-title'>Hugging Face Space page</div>
+        <div class='sub'>Repo view, build logs, discussions</div>
+      </a>
+      <a class='res-card' href='{SPACE_APP_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>🟢</div>
+        <div class='res-title'>Live environment</div>
+        <div class='sub'>You are here — OpenEnv endpoints live</div>
+      </a>
+      <a class='res-card' href='{COLAB_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>🎓</div>
+        <div class='res-title'>Reproduce training (Colab T4)</div>
+        <div class='sub'>One-click notebook, ~1 h wall clock</div>
+      </a>
+      <a class='res-card' href='{README_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>📖</div>
+        <div class='res-title'>README (Part 1 + Part 2)</div>
+        <div class='sub'>Story overview + full technical deep-dive</div>
+      </a>
+      <a class='res-card' href='{BLOG_POST_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>📝</div>
+        <div class='res-title'>Mini blog post</div>
+        <div class='sub'>The short writeup — MD file on the HF Space + GitHub</div>
+      </a>
+      <a class='res-card' href='{VIDEO_SCRIPT_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>🎬</div>
+        <div class='res-title'>2-minute video script</div>
+        <div class='sub'>Optional bonus — shot list + narration</div>
+      </a>
+      <a class='res-card' href='{SUBMISSION_CHECKLIST_URL}' target='_blank' rel='noopener'>
+        <div class='res-icon'>✅</div>
+        <div class='res-title'>Submission checklist</div>
+        <div class='sub'>Every judging rule → where to find the evidence</div>
+      </a>
+    </div>
 
     <h2>Headline results</h2>
     <div class='grid'>
@@ -585,10 +741,20 @@ def _dashboard_html() -> str:
   </div>
 
   <footer>
-    Incident Command Center v{_CONFIG.version} · Built on
-    <a href='https://github.com/meta-pytorch/openenv' target='_blank' rel='noopener'>OpenEnv</a>
-    · <a href='{GITHUB_URL}' target='_blank' rel='noopener'>Source on GitHub</a>
-    · <a href='{COLAB_URL}' target='_blank' rel='noopener'>Reproduce training on Colab</a>
+    <div>
+      <strong>Incident Command Center v{_CONFIG.version}</strong> · Built on
+      <a href='https://github.com/meta-pytorch/openenv' target='_blank' rel='noopener'>OpenEnv</a>
+      for the OpenEnv India 2026 Round 2 hackathon.
+    </div>
+    <div style='margin-top:0.4rem'>
+      <a href='{GITHUB_URL}' target='_blank' rel='noopener'>GitHub</a> ·
+      <a href='{SPACE_PAGE_URL}' target='_blank' rel='noopener'>HF Space page</a> ·
+      <a href='{COLAB_URL}' target='_blank' rel='noopener'>Colab</a> ·
+      <a href='{README_URL}' target='_blank' rel='noopener'>README</a> ·
+      <a href='{BLOG_POST_URL}' target='_blank' rel='noopener'>Blog post</a> ·
+      <a href='{VIDEO_SCRIPT_URL}' target='_blank' rel='noopener'>Video script</a> ·
+      <a href='{SUBMISSION_CHECKLIST_URL}' target='_blank' rel='noopener'>Submission checklist</a>
+    </div>
   </footer>
 
   <script>

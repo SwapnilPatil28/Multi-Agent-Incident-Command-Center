@@ -112,8 +112,8 @@ Same pipeline, same data recipe, smaller backbone:
 | 🟢 **Live environment** | **[Open the dashboard ↗](https://swapnilpatil28-multi-agent-incident-command-center.hf.space)** |
 | 💻 **Source code** | **[GitHub repo ↗](https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center)** |
 | 🎓 **Reproduce the training** | **[One-click Colab notebook ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)** |
-| 📺 **2-minute video walkthrough** | *Coming soon — shot list in [`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md)* |
-| 📝 **Mini blog post** | *Coming soon — full draft in [`docs/BLOG_POST.md`](./docs/BLOG_POST.md)* |
+| 📝 **Mini blog post** (the required short writeup) | **[`docs/BLOG_POST.md`](./docs/BLOG_POST.md)** |
+| 🎬 **2-minute video script** (optional bonus) | **[`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md)** |
 
 > Want the rubric math, architecture, full numbers, configuration, and the hackathon checklist? Keep scrolling — **Part 2** is the full technical README.
 
@@ -129,8 +129,9 @@ Same pipeline, same data recipe, smaller backbone:
 | Hugging Face Space page | **[`huggingface.co/spaces/SwapnilPatil28/Multi-Agent-Incident-Command-Center`](https://huggingface.co/spaces/SwapnilPatil28/Multi-Agent-Incident-Command-Center)** |
 | GitHub repository | **[`github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center`](https://github.com/SwapnilPatil28/Multi-Agent-Incident-Command-Center)** |
 | Training notebook (Colab T4, one-click reproducible) | **[Open in Colab ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)** |
-| 2-minute video walkthrough | *Coming soon — [`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md) has the shot list* |
-| Mini blog post | *Coming soon — full draft in [`docs/BLOG_POST.md`](./docs/BLOG_POST.md), ready to publish on hf.co/blog* |
+| Mini blog post (the required short writeup) | [`docs/BLOG_POST.md`](./docs/BLOG_POST.md) |
+| 2-minute video script (optional bonus) | [`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md) |
+| Submission checklist | [`docs/SUBMISSION_CHECKLIST.md`](./docs/SUBMISSION_CHECKLIST.md) |
 | Training script (Python) | [`train_trl.py`](./train_trl.py) |
 
 Three specialist agents — **Triage**, **Investigator**, and **Ops Manager** — cooperate to resolve a queue of production incidents while operating under strict **SLA budgets**, **investigation costs**, and **customer-tier impact multipliers**. The environment is designed to reward *real* operational reasoning, not pattern matching on the root-cause label.
@@ -636,9 +637,9 @@ Two scripts judges (or you) can run without a local IDE:
 │   └── before_after_demo.py           # Side-by-side base vs SFT trace generator
 │
 ├── docs/
-│   ├── BLOG_POST.md                   # HF blog draft (publish to hf.co/blog)
-│   ├── VIDEO_SCRIPT.md                # 2-minute YouTube script with link list
-│   └── SUBMISSION_CHECKLIST.md        # Judging-criteria checklist + smoke tests
+│   ├── BLOG_POST.md                   # The short writeup (rule 4) — renders on HF Space + GitHub
+│   ├── VIDEO_SCRIPT.md                # Optional 2-minute walkthrough script
+│   └── SUBMISSION_CHECKLIST.md        # Judging-criteria status + smoke tests
 │
 ├── artifacts/                         # All committed training evidence
 │   ├── reward_curve.png               # 4-policy reward comparison (1.5B headline)
@@ -706,9 +707,9 @@ Full checklist with pre-submission smoke tests → [`docs/SUBMISSION_CHECKLIST.m
 - [x] **Production-quality HTTP server**: `/healthz`, `/version`, `/env-info`, `/metrics`, Dockerfile with `HEALTHCHECK`
 - [x] **Structured JSON logging** + 12-factor configuration
 - [x] **One-click Colab training notebook** → [Open ↗](https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI6kZ3LP?usp=sharing)
-- [x] **Blog draft** ([`docs/BLOG_POST.md`](./docs/BLOG_POST.md)) + **video script** ([`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md))
-- [ ] Publish the Hugging Face blog post and swap the "Coming soon" link in the Live-links table
-- [ ] Upload the YouTube video and swap the "Coming soon" link in the Live-links table
+- [x] **Mini blog post** published as an MD file on both the HF Space and GitHub: [`docs/BLOG_POST.md`](./docs/BLOG_POST.md)
+- [x] **2-minute video script** (optional bonus): [`docs/VIDEO_SCRIPT.md`](./docs/VIDEO_SCRIPT.md)
+- [x] **Full submission checklist** mapping every rule → evidence: [`docs/SUBMISSION_CHECKLIST.md`](./docs/SUBMISSION_CHECKLIST.md)
 
 ---
 

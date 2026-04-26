@@ -54,7 +54,7 @@ COLAB_URL = "https://colab.research.google.com/drive/1vx9E5FrZZrHoRwXs2cvtom3DaI
 # GitHub) so a judge who opens the Space stays inside the HF ecosystem. The
 # README on the Space page is rendered directly, so we point at the Space
 # root for it; the other three open the HF file browser.
-README_URL = SPACE_PAGE_URL
+README_URL = f"{SPACE_PAGE_URL}/blob/main/README.md"
 BLOG_POST_URL = f"{SPACE_PAGE_URL}/blob/main/docs/BLOG_POST.md"
 VIDEO_SCRIPT_URL = f"{SPACE_PAGE_URL}/blob/main/docs/VIDEO_SCRIPT.md"
 SUBMISSION_CHECKLIST_URL = f"{SPACE_PAGE_URL}/blob/main/docs/SUBMISSION_CHECKLIST.md"
